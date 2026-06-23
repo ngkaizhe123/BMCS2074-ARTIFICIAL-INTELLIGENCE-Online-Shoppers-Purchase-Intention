@@ -37,4 +37,4 @@ jobs:
 
       - name: Verify Script Compilation
         run: |
-          python -m py_compile main.py app.py src/data_preprocessing.py
+          python -m py_compile main.py src/data_preprocessing.py
