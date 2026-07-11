@@ -1,4 +1,4 @@
-name: Python ML Project CI
+name: AI ML Project CI
 on:
   push:
     branches: [ "main" ]
