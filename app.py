@@ -2,14 +2,14 @@ import streamlit as st
 
 # 1. set the page config (must be the first line)
 st.set_page_config(
-    page_title="Customer Purchase Prediction System",
+    page_title="Online Shopper Purchase Intention System",
     page_icon="🛍️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # 2. set the main title of the website
-st.title("🛍️ Customer Purchase Prediction System")
+st.title("Online Shopper Purchase Intention System")
 st.markdown("---")  # break line
 
 # 3. set the project overview
