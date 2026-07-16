@@ -56,9 +56,9 @@ Compare different classification algorithms using:
 
 Models included:
 
-* ANN
-* SVM
 * KNN
+* SVM
+* XGBoost
 
 ---
 
