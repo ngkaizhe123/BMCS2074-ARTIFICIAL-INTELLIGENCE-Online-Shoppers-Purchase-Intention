@@ -1,31 +1,54 @@
-import os
-
-import joblib
 import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
-def get_cleaned_data(filepath="data/customer_purchase_data.csv"):
-    print(" Fetching and cleaning data ...")
+def preprocess_data(filepath="../data/raw/online_shoppers_intention.csv"):
+    # Load raw dataset
     df = pd.read_csv(filepath)
 
-    df = pd.get_dummies(df, columns=["ProductCategory"], drop_first=False)
+    # Convert target to integer
+    # False -> 0
+    # True  -> 1
+    df["Revenue"] = df["Revenue"].astype(int)
 
-    X = df.drop("PurchaseStatus", axis=1)
-    y = df["PurchaseStatus"]
+    X = df.drop("Revenue", axis=1)
+    y = df["Revenue"]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+    categorical_features = ["Month", "VisitorType", "Weekend"]
+    numerical_features = [col for col in X.columns if col not in categorical_features]
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(handle_unknown="ignore"),
+                categorical_features,
+            ),
+            (
+                "num",
+                StandardScaler(),
+                numerical_features,
+            ),
+        ]
     )
 
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y,
+    )
 
-    os.makedirs("saved_models", exist_ok=True)
+    X_train = preprocessor.fit_transform(X_train)
+    X_test = preprocessor.transform(X_test)
 
-    joblib.dump(scaler, "saved_models/scaler.pkl")
-    print("[SUCCESS] Scaler saved at saved_models/scaler.pkl")
-
-    return X_train_scaled, X_test_scaled, y_train, y_test
+    return (
+        X_train,
+        X_test,
+        y_train,
+        y_test,
+        preprocessor,
+    )
