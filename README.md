@@ -10,7 +10,7 @@ different machine learning models, and perform real-time purchase intention pred
 
 Three classification models are implemented and evaluated:
 
-* Artificial Neural Network (ANN)
+* eXtreme Gradient Boosting (XGBoost)
 * Support Vector Machine (SVM)
 * K-Nearest Neighbors (KNN)
 
