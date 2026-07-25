@@ -1,39 +1,64 @@
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path for imports
+project_root = Path(__file__).resolve().parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import streamlit as st
 
-# 1. set the page config (must be the first line)
+# ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
-    page_title="Online Shopper Purchase Intention System",
+    page_title="Online Shopper Purchase Intention",
     page_icon="🛍️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# 2. set the main title of the website
-st.title("Online Shopper Purchase Intention System")
-st.markdown("---")  # break line
+# ── Main landing page ──────────────────────────────────────────────────────
+st.title("🛍️ Online Shopper Purchase Intention System")
+st.markdown("---")
 
-# 3. set the project overview
 st.markdown("""
-### 📌 Project Background (Project Overview)
-Welcome to our machine learning end-of-term project exhibition platform!
-**Supervised Machine Learning**, based on user behavior data on e-commerce websites (such as browsing duration, whether it's a weekend, bounce rate, etc.), predict whether the user will ultimately make a purchase.
+### 📌 Project Overview
+This platform demonstrates the use of **Supervised Machine Learning** to predict 
+whether an online shopper will make a purchase, based on their browsing behaviour 
+(page views, bounce rate, session duration, visitor type, etc.).
 
-### 🎯 Objectives (Objectives)
-* **Binary Classification Task:** Predict customer purchase behavior (`0`: not purchase, `1`: purchase).
-* **Multi-Model Comparison:** Compete with three classic machine learning algorithms and compare their performance.
-
----
-
-### 🚀 Sidebar Navigation Guide (Navigation)
-Click on the menu bar on the left side of the screen to experience our system:
-* **📊 1. Data Exploration:** View the structure and data distribution of the dataset we used.
-* **📈 2. Model Comparison:** View the evaluation scores of the **ANN**, **SVM**, **KNN** three models (Accuracy, F1-score, etc.).
-* **🔮 3. Live Prediction:** Enter simulated data personally and call the AI model loaded in the background to test whether it will predict you to purchase!
+### 🎯 Objectives
+* **Binary Classification** – Predict purchase intent (`0` = No Purchase, `1` = Purchase).
+* **Multi-Model Comparison** – Train and compare several ML algorithms and evaluate 
+  their performance on the same dataset.
+* **Imbalanced Data Handling** – Apply **SMOTE** oversampling inside an `imblearn` 
+  Pipeline to avoid data leakage during cross-validation.
 
 ---
 
-### 👨‍💻 Development Team (Team Members)
-* **NG KAI ZHE** - Responsible for ANN neural network model and Streamlit architecture setup
-* **TAN YONG SHENG** - Responsible for SVM model building
-* **YAU SOON HAN** - Responsible for KNN model building and feature engineering
+### 🚀 Navigation Guide
+Use the **sidebar** on the left to explore:
+
+| Page | Description |
+|------|-------------|
+| 📊 **Data Exploration** | View dataset structure, distributions, and EDA plots |
+| 📈 **Model Comparison** | Compare evaluation metrics across all trained models |
+| 🔮 **Live Prediction** | Enter simulated user data and get a real-time purchase prediction |
+
+---
+
+### 👨‍💻 Development Team
+* **NG KAI ZHE** – XGBoost model & Streamlit architecture
+* **TAN YONG SHENG** – SVM model
+* **YAU SOON HAN** – KNN model & feature engineering
 """)
+
+# ── Sidebar: show detected models ──────────────────────────────────────────
+saved_dir = project_root / "saved_models"
+pkl_files = sorted(saved_dir.glob("*.pkl")) if saved_dir.exists() else []
+
+st.sidebar.markdown("### 🤖 Detected Models")
+if pkl_files:
+    for p in pkl_files:
+        st.sidebar.success(f"✅  `{p.name}`")
+else:
+    st.sidebar.warning("No `.pkl` models found in `saved_models/`.")

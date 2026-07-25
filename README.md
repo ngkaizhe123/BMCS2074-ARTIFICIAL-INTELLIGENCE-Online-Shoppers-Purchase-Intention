@@ -15,7 +15,7 @@ Three classification models are implemented and evaluated:
 * K-Nearest Neighbors (KNN)
 
 The project compares the performance of each model using standard evaluation metrics including **Accuracy, Precision,
-Recall, and F1-score**.
+Recall, F1-score, and **ROC-AUC**.
 
 ---
 
@@ -53,6 +53,7 @@ Compare different classification algorithms using:
 * Recall
 * F1-score
 * Confusion Matrix
+* ROC-AUC
 
 Models included:
 
@@ -157,6 +158,7 @@ The implemented models are evaluated using:
 * Recall
 * F1-score
 * Confusion Matrix
+* ROC-AUC
 
 The best-performing model is selected based on its overall classification performance.
 
