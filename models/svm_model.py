@@ -110,7 +110,7 @@ def build_svm_pipeline(use_smote: bool = True, random_state: int = 42) -> Pipeli
     numerical features through untouched.
     """
     preprocessor = build_preprocessor(scale_numerical=True)
-    svm = SVC(probability=True, random_state=random_state)
+    svm = SVC(random_state=random_state)
 
     if use_smote:
         steps = [
@@ -130,12 +130,12 @@ def train_svm(
     param_grid: dict | None = None,
     scoring: str = "f1",
     cv: int = 5,
-    search: str = "grid",
-    n_iter: int = 20,
+    search: str = "random",
+    n_iter: int = 8,
     random_state: int = 42,
     output_path: str | Path | None = "saved_models/svm_model.pkl",
     verbose: int = 2,
-    n_jobs: int = -1,
+    n_jobs: int = 2,
 ):
     """Train an SVM classifier with hyperparameter tuning and save it.
 
@@ -472,15 +472,15 @@ def generate_svm_report(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    X_train, X_test, y_train, y_test, _ = preprocess_data(transform=False)
+    # Define absolute path to the dataset using project_root
+    data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
 
-    model, search_obj = train_svm(X_train, y_train, output_path="saved_models/svm_model.pkl")
+    # Pass the data_path into preprocess_data
+    X_train, X_test, y_train, y_test, _ = preprocess_data(filepath=data_path, transform=False)
+
+    # Save path relative to project root as well
+    save_path = project_root / "saved_models" / "svm_model.pkl"
+    model = train_svm(X_train, y_train, output_path=save_path)
 
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("SVM Classifier", metrics)
-
-    print("\n[train_svm] Top 5 hyperparameter combinations:")
-    print(get_grid_search_results(search_obj).head())
-
-    print("\n[train_svm] 5-fold cross-validation of the final model:")
-    print(cross_validate_svm(model, X_train, y_train)[["Mean", "Std"]])
