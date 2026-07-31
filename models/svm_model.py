@@ -11,7 +11,7 @@ from imblearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
 
-from src.data_preprocessing import build_preprocessor, preprocess_data
+from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
 from src.utils import evaluate_model, print_metrics, save_model
 
 
@@ -29,7 +29,7 @@ def train_svm(
         pipeline = Pipeline(
             steps=[
                 ("preprocessor", preprocessor),
-                ("smote", SMOTE(random_state=42)),
+                ("smote", get_smote()),
                 ("svm", svm),
             ]
         )
