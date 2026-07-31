@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
+from imblearn.over_sampling import SMOTE
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -173,6 +174,20 @@ def build_preprocessor(scale_numerical: bool = False) -> ColumnTransformer:
         )
 
     return preprocessor
+
+
+# ---------------------------------------------------------------------------
+# Step 5b – Shared SMOTE Instance (used inside each model's Pipeline)
+# ---------------------------------------------------------------------------
+
+
+def get_smote(random_state: int = 42) -> SMOTE:
+    """
+    Return a configured SMOTE instance for oversampling the minority class.
+    Must be used as a step inside an imblearn Pipeline (not applied once
+    upfront) so resampling only happens on training folds during CV.
+    """
+    return SMOTE(random_state=random_state)
 
 
 # ---------------------------------------------------------------------------
