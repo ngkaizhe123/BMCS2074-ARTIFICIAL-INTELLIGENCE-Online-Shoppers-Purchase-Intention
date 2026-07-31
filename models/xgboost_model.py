@@ -6,12 +6,11 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
 from sklearn.model_selection import RandomizedSearchCV
 from xgboost import XGBClassifier
 
-from src.data_preprocessing import build_preprocessor, preprocess_data
+from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
 from src.utils import evaluate_model, print_metrics, save_model
 
 
@@ -41,7 +40,7 @@ def train_xgboost(
         pipeline = Pipeline(
             steps=[
                 ("preprocessor", preprocessor),
-                ("smote", SMOTE(random_state=42)),
+                ("smote", get_smote()),
                 ("xgb", xgb),
             ]
         )
