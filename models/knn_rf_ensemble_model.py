@@ -27,12 +27,12 @@ def train_knn_rf_ensemble(
     (instance-based, local decision boundary) with Random Forest (bagged,
     tree-based, global decision boundary). The two algorithms make different
     kinds of errors, which is the theoretical motivation for ensembling them.
- 
+
     Note: empirical testing on this dataset (see report Discussion) shows this
     ensemble matches, but does not exceed, a standalone tuned Random Forest.
     It is included to demonstrate ensemble methodology and its trade-offs,
     not to replace the individual KNN model used for the 3-way comparison.
- 
+
     Args:
         X_train: Training features (raw DataFrame, preprocessed inside the Pipeline).
         y_train: Training target (0/1).
@@ -43,10 +43,10 @@ def train_knn_rf_ensemble(
             weight of 1. Higher values lean the ensemble more toward Random
             Forest's predictions (empirically the stronger of the two models).
         output_path: Where to save the trained ensemble (.pkl). Pass None to skip saving.
- 
+
     Returns:
         The fitted VotingClassifier ensemble.
- 
+
     Raises:
         ValueError: If X_train/y_train are empty or y_train has fewer than 2 classes.
         RuntimeError: If GridSearchCV fails to fit the Random Forest branch.
