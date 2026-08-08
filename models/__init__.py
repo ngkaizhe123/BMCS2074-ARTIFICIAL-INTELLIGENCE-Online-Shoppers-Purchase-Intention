@@ -1,4 +1,4 @@
-from .knn_model import train_knn
+from .knn_rf_ensemble_model import train_knn
 from .svm_model import train_svm
 from .xgboost_model import train_xgboost
 
