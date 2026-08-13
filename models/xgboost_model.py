@@ -11,7 +11,7 @@ from sklearn.model_selection import RandomizedSearchCV
 from xgboost import XGBClassifier
 
 from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
-from src.utils import evaluate_model, print_metrics, save_model
+from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
 
 
 def train_xgboost(
@@ -37,10 +37,11 @@ def train_xgboost(
     )
 
     if use_smote:
+        smote = get_smote()
         pipeline = Pipeline(
             steps=[
                 ("preprocessor", preprocessor),
-                ("smote", get_smote()),
+                ("smote", smote),
                 ("xgb", xgb),
             ]
         )
@@ -80,11 +81,12 @@ def train_xgboost(
         n_iter=30,
         scoring="f1",
         cv=5,
-        verbose=2,
+        verbose=0,
         random_state=42,
         n_jobs=-1,
     )
 
+    print("Fitting 5 folds for each of 30 candidates, totalling 150 fits")
     random_search.fit(X_train, y_train)
     best_model = random_search.best_estimator_
 
@@ -104,3 +106,16 @@ if __name__ == "__main__":
     )
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("XGBoost Classifier", metrics)
+
+    # Generate and save SHAP explanations
+    print("\n[SHAP] Generating SHAP explanations for XGBoost...")
+    try:
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            save_dir="report_assets/plots",
+            prefix="xgboost_",
+            show=False,
+        )
+    except Exception as e:
+        print(f"[SHAP] Skipped SHAP generation: {e}")

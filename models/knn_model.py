@@ -6,13 +6,12 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 
 from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
-from src.utils import evaluate_model, print_metrics, save_model
+from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
 
 
 def train_knn(
@@ -73,3 +72,16 @@ if __name__ == "__main__":
     model = train_knn(X_train, y_train, output_path="saved_models/knn_model.pkl")
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("KNN Classifier", metrics)
+
+    # Generate and save SHAP explanations
+    print("\n[SHAP] Generating SHAP explanations for KNN...")
+    try:
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            save_dir="report_assets/plots",
+            prefix="knn_",
+            show=False,
+        )
+    except Exception as e:
+        print(f"[SHAP] Skipped SHAP generation: {e}")

@@ -171,7 +171,7 @@ def plot_target_distribution(
         f"\n  Target: No Purchase = {counts[0]:,} ({pcts[0]:.1f}%), "
         f"Purchase = {counts[1]:,} ({pcts[1]:.1f}%)"
     )
-    print(f"  Imbalance ratio ≈ {ratio:.2f}:1")
+    print(f"  Imbalance ratio ~ {ratio:.2f}:1")
 
 
 # ===================================================================
@@ -732,20 +732,20 @@ def print_key_findings(df: pd.DataFrame) -> None:
     print("14. KEY FINDINGS")
     print("=" * 70)
     findings = [
-        f"• Dataset has {df.shape[0]:,} sessions, {df.shape[1]} features, "
+        f"- Dataset has {df.shape[0]:,} sessions, {df.shape[1]} features, "
         f"no missing values.",
-        f"• Target is imbalanced: {rev_counts[0]:,} No vs {rev_counts[1]:,} Yes "
-        f"(ratio ≈ {rev_counts[0] / rev_counts[1]:.1f}:1).",
-        f"• PageValues = 0 in {pv_zero_pct:.1f}% of sessions; "
+        f"- Target is imbalanced: {rev_counts[0]:,} No vs {rev_counts[1]:,} Yes "
+        f"(ratio ~ {rev_counts[0] / rev_counts[1]:.1f}:1).",
+        f"- PageValues = 0 in {pv_zero_pct:.1f}% of sessions; "
         f"purchase rate {pv_zero_rate:.2f}% vs {pv_pos_rate:.2f}% when > 0.",
-        f"• Best month: {best_month} ({month_rate[best_month] * 100:.1f}%), "
+        f"- Best month: {best_month} ({month_rate[best_month] * 100:.1f}%), "
         f"worst: {worst_month} ({month_rate[worst_month] * 100:.1f}%).",
-        f"• Best visitor type: {best_vt} "
+        f"- Best visitor type: {best_vt} "
         f"({vt_rate[best_vt] * 100:.1f}% purchase rate).",
-        f"• Weekday rate: {wk_day:.2f}%, Weekend rate: {wk_end:.2f}%.",
-        "• PageValues is the strongest single predictor of Revenue.",
-        "• BounceRates and ExitRates are negatively correlated with Revenue.",
-        "• ProductRelated_Duration and PageValues show clear separation "
+        f"- Weekday rate: {wk_day:.2f}%, Weekend rate: {wk_end:.2f}%.",
+        "- PageValues is the strongest single predictor of Revenue.",
+        "- BounceRates and ExitRates are negatively correlated with Revenue.",
+        "- ProductRelated_Duration and PageValues show clear separation "
         "between classes.",
     ]
     for f in findings:
@@ -759,7 +759,7 @@ def print_key_findings(df: pd.DataFrame) -> None:
 
 def run_eda(
     filepath: str = "data/raw/online_shoppers_intention.csv",
-    save_dir: str | None = "report_assets/plots",
+    save_dir: str | None = "report_assets/plots/eda",
     show: bool = False,
 ) -> pd.DataFrame:
     """
@@ -809,7 +809,7 @@ def run_eda(
 
 if __name__ == "__main__":
     data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
-    output_dir = project_root / "report_assets" / "plots"
+    output_dir = project_root / "report_assets" / "plots" / "eda"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     run_eda(filepath=data_path, save_dir=str(output_dir), show=False)
