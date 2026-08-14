@@ -205,21 +205,29 @@ def generate_shap_explanation(
             if hasattr(preprocessor, "get_feature_names_out"):
                 feature_names = [str(n) for n in preprocessor.get_feature_names_out()]
             else:
-                feature_names = [f"feature_{i}" for i in range(X_test_transformed.shape[1])]
+                feature_names = [
+                    f"feature_{i}" for i in range(X_test_transformed.shape[1])
+                ]
         else:
-            X_test_transformed = X_test.values if isinstance(X_test, pd.DataFrame) else X_test
-            feature_names = list(X_test.columns) if isinstance(X_test, pd.DataFrame) else [
-                f"feature_{i}" for i in range(X_test_transformed.shape[1])
-            ]
+            X_test_transformed = (
+                X_test.values if isinstance(X_test, pd.DataFrame) else X_test
+            )
+            feature_names = (
+                list(X_test.columns)
+                if isinstance(X_test, pd.DataFrame)
+                else [f"feature_{i}" for i in range(X_test_transformed.shape[1])]
+            )
         estimator = model.steps[-1][1]
     else:
         # VotingClassifier or bare estimator: keep raw DataFrame so internal
         # ColumnTransformers can still access columns by name.
         estimator = model
         X_test_transformed = X_test  # keep as DataFrame
-        feature_names = list(X_test.columns) if isinstance(X_test, pd.DataFrame) else [
-            f"feature_{i}" for i in range(X_test.shape[1])
-        ]
+        feature_names = (
+            list(X_test.columns)
+            if isinstance(X_test, pd.DataFrame)
+            else [f"feature_{i}" for i in range(X_test.shape[1])]
+        )
 
     # 2. Select appropriate Explainer
     estimator_name = estimator.__class__.__name__.lower()
@@ -242,7 +250,9 @@ def generate_shap_explanation(
             background = X_test_transformed.sample(n=n_background, random_state=42)
             X_explain = X_test_transformed.iloc[:n_explain]
         else:
-            idx = np.random.RandomState(42).choice(len(X_test_transformed), n_background, replace=False)
+            idx = np.random.RandomState(42).choice(
+                len(X_test_transformed), n_background, replace=False
+            )
             background = X_test_transformed[idx]
             X_explain = X_test_transformed[:n_explain]
 
@@ -264,7 +274,9 @@ def generate_shap_explanation(
             val = raw_shap_values
             base_val = explainer.expected_value
 
-        data_array = X_explain.values if isinstance(X_explain, pd.DataFrame) else X_explain
+        data_array = (
+            X_explain.values if isinstance(X_explain, pd.DataFrame) else X_explain
+        )
 
         shap_values = shap.Explanation(
             values=val,
