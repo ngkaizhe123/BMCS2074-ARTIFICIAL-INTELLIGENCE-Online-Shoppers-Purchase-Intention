@@ -452,9 +452,7 @@ def get_smotenc(X: pd.DataFrame, random_state: int = 42) -> SMOTENC:
     random_state : int
         Seed for reproducibility.
     """
-    cat_indices = [
-        i for i, col in enumerate(X.columns) if col in CATEGORICAL_FEATURES
-    ]
+    cat_indices = [i for i, col in enumerate(X.columns) if col in CATEGORICAL_FEATURES]
     return SMOTENC(categorical_features=cat_indices, random_state=random_state)
 
 

@@ -63,7 +63,9 @@ def save_cleaned_dataset(
     path = Path(filepath)
     path.parent.mkdir(exist_ok=True, parents=True)
     df.to_csv(path, index=False)
-    print(f"[save_cleaned_dataset] Cleaned dataset saved to: {path.resolve()} (Shape: {df.shape})")
+    print(
+        f"[save_cleaned_dataset] Cleaned dataset saved to: {path.resolve()} (Shape: {df.shape})"
+    )
 
 
 def evaluate_model(model, X_test, y_test) -> dict:
@@ -80,9 +82,7 @@ def evaluate_model(model, X_test, y_test) -> dict:
         "F1": f1_score(y_test, y_pred, zero_division=0),
         "AUC": roc_auc_score(y_test, y_prob) if y_prob is not None else None,
         "Confusion Matrix": confusion_matrix(y_test, y_pred),
-        "Classification Report": classification_report(
-            y_test, y_pred, zero_division=0
-        ),
+        "Classification Report": classification_report(y_test, y_pred, zero_division=0),
     }
 
     return metrics
@@ -188,44 +188,70 @@ def generate_shap_explanation(
             "Please install it using: pip install shap"
         )
 
-    # 1. Extract preprocessor and final estimator from Pipeline if applicable
-    if hasattr(model, "named_steps"):
+    # 1. Determine if model is a complex ensemble (e.g. VotingClassifier) whose
+    #    sub-pipelines need raw DataFrames internally. In that case we must NOT
+    #    pre-transform X_test ourselves; instead we pass X_test as-is to the
+    #    full model's predict_proba so column names are preserved.
+    estimator_class = model.__class__.__name__.lower()
+    is_voting_ensemble = "voting" in estimator_class
+
+    if hasattr(model, "named_steps") and not is_voting_ensemble:
+        # Standard sklearn/imblearn Pipeline: extract preprocessor + final estimator
         if "preprocessor" in model.named_steps:
             preprocessor = model.named_steps["preprocessor"]
             X_test_transformed = preprocessor.transform(X_test)
+            if hasattr(X_test_transformed, "toarray"):
+                X_test_transformed = X_test_transformed.toarray()
             if hasattr(preprocessor, "get_feature_names_out"):
-                feature_names = preprocessor.get_feature_names_out()
+                feature_names = [str(n) for n in preprocessor.get_feature_names_out()]
             else:
                 feature_names = [f"feature_{i}" for i in range(X_test_transformed.shape[1])]
         else:
-            X_test_transformed = X_test
-            feature_names = getattr(X_test, "columns", [f"feature_{i}" for i in range(X_test.shape[1])])
-
+            X_test_transformed = X_test.values if isinstance(X_test, pd.DataFrame) else X_test
+            feature_names = list(X_test.columns) if isinstance(X_test, pd.DataFrame) else [
+                f"feature_{i}" for i in range(X_test_transformed.shape[1])
+            ]
         estimator = model.steps[-1][1]
     else:
+        # VotingClassifier or bare estimator: keep raw DataFrame so internal
+        # ColumnTransformers can still access columns by name.
         estimator = model
-        X_test_transformed = X_test
-        feature_names = getattr(X_test, "columns", [f"feature_{i}" for i in range(X_test.shape[1])])
-
-    # Convert sparse matrix to dense array if necessary
-    if hasattr(X_test_transformed, "toarray"):
-        X_test_transformed = X_test_transformed.toarray()
-
-    feature_names = [str(name) for name in feature_names]
+        X_test_transformed = X_test  # keep as DataFrame
+        feature_names = list(X_test.columns) if isinstance(X_test, pd.DataFrame) else [
+            f"feature_{i}" for i in range(X_test.shape[1])
+        ]
 
     # 2. Select appropriate Explainer
     estimator_name = estimator.__class__.__name__.lower()
-    if "xgb" in estimator_name or "forest" in estimator_name or "tree" in estimator_name:
+    if (
+        "xgb" in estimator_name
+        or "randomforest" in estimator_name
+        or "decisiontree" in estimator_name
+    ) and not is_voting_ensemble:
+        # Fast TreeExplainer (only for single tree-based estimators, not ensembles
+        # that contain heterogeneous sub-models)
         explainer = shap.TreeExplainer(estimator)
         shap_values = explainer(X_test_transformed)
     else:
-        # KernelExplainer for non-tree models (e.g. KNN, SVM)
-        background = shap.sample(X_test_transformed, min(50, len(X_test_transformed)))
-        predict_fn = estimator.predict_proba if hasattr(estimator, "predict_proba") else estimator.predict
-        raw_shap_values = shap.KernelExplainer(predict_fn, background).shap_values(
-            X_test_transformed[: min(100, len(X_test_transformed))]
+        # KernelExplainer for KNN, SVM, VotingClassifier, etc.
+        # Preserve DataFrame format so sub-pipelines can look up columns by name.
+        n_background = min(50, len(X_test_transformed))
+        n_explain = min(100, len(X_test_transformed))
+
+        if isinstance(X_test_transformed, pd.DataFrame):
+            background = X_test_transformed.sample(n=n_background, random_state=42)
+            X_explain = X_test_transformed.iloc[:n_explain]
+        else:
+            idx = np.random.RandomState(42).choice(len(X_test_transformed), n_background, replace=False)
+            background = X_test_transformed[idx]
+            X_explain = X_test_transformed[:n_explain]
+
+        predict_fn = (
+            model.predict_proba if hasattr(model, "predict_proba") else model.predict
         )
+
         explainer = shap.KernelExplainer(predict_fn, background)
+        raw_shap_values = explainer.shap_values(X_explain)
 
         if isinstance(raw_shap_values, list) and len(raw_shap_values) == 2:
             val = raw_shap_values[1]
@@ -238,10 +264,12 @@ def generate_shap_explanation(
             val = raw_shap_values
             base_val = explainer.expected_value
 
+        data_array = X_explain.values if isinstance(X_explain, pd.DataFrame) else X_explain
+
         shap_values = shap.Explanation(
             values=val,
             base_values=base_val,
-            data=X_test_transformed[: min(100, len(X_test_transformed))],
+            data=data_array,
             feature_names=feature_names,
         )
 
@@ -277,7 +305,9 @@ def generate_shap_explanation(
     # Plot 2: Bar Plot (Importance)
     fig_bar = plt.figure(figsize=(10, 6))
     shap.plots.bar(shap_values, max_display=max_display, show=False)
-    plt.title(f"SHAP Feature Importance ({model_label})", fontsize=13, fontweight="bold")
+    plt.title(
+        f"SHAP Feature Importance ({model_label})", fontsize=13, fontweight="bold"
+    )
     plt.tight_layout()
     _save_or_show(fig_bar, "shap_feature_importance.png")
     figures["bar"] = fig_bar
@@ -285,10 +315,11 @@ def generate_shap_explanation(
     # Plot 3: Single Sample Waterfall Plot
     fig_waterfall = plt.figure(figsize=(10, 6))
     shap.plots.waterfall(shap_values[0], max_display=min(10, max_display), show=False)
-    plt.title(f"SHAP Waterfall Plot ({model_label} Sample #0)", fontsize=13, fontweight="bold")
+    plt.title(
+        f"SHAP Waterfall Plot ({model_label} Sample #0)", fontsize=13, fontweight="bold"
+    )
     plt.tight_layout()
     _save_or_show(fig_waterfall, "shap_waterfall.png")
     figures["waterfall"] = fig_waterfall
 
     return explainer, shap_values, figures
-

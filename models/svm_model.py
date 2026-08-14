@@ -11,7 +11,12 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
-from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
+from src.utils import (
+    evaluate_model,
+    generate_shap_explanation,
+    print_metrics,
+    save_model,
+)
 
 
 def train_svm(

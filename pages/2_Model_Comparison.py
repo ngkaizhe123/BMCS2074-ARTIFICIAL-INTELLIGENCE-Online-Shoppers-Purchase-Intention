@@ -36,7 +36,11 @@ def discover_models():
             try:
                 model = joblib.load(pkl)
                 nice_name = pkl.stem.replace("_", " ").title()
-                models[nice_name] = {"path": pkl, "model": model, "stem": pkl.stem.split("_")[0]}
+                models[nice_name] = {
+                    "path": pkl,
+                    "model": model,
+                    "stem": pkl.stem.split("_")[0],
+                }
             except Exception as e:
                 st.warning(f"⚠️ Failed to load `{pkl.name}`: {e}")
     return models
@@ -133,4 +137,6 @@ if results:
                     st.subheader(f"🧠 SHAP Model Explanations ({name})")
                     for img_file in sorted(shap_plots):
                         plot_title = img_file.stem.replace("_", " ").title()
-                        st.image(str(img_file), caption=plot_title, use_container_width=True)
+                        st.image(
+                            str(img_file), caption=plot_title, use_container_width=True
+                        )

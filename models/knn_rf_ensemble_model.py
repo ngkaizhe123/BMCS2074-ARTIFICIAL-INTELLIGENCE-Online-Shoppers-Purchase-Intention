@@ -12,7 +12,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 
 from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
-from src.utils import evaluate_model, print_metrics, save_model
+from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
 
 
 def train_knn_rf_ensemble(
@@ -131,3 +131,16 @@ if __name__ == "__main__":
     )
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("KNN + Random Forest Ensemble", metrics)
+
+    # Generate and save SHAP explanations
+    print("\n[SHAP] Generating SHAP explanations for KNN + RF Ensemble...")
+    try:
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            save_dir="report_assets/plots",
+            prefix="knn_rf_",
+            show=False,
+        )
+    except Exception as e:
+        print(f"[SHAP] Skipped SHAP generation: {e}")
