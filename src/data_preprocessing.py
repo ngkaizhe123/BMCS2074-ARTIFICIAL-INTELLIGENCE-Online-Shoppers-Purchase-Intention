@@ -28,7 +28,7 @@ from __future__ import annotations
 import sys
 import numpy as np
 import pandas as pd
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, SMOTENC
 from pathlib import Path
 from scipy import stats
 from sklearn.compose import ColumnTransformer
@@ -410,6 +410,50 @@ def get_smote(random_state: int = 42) -> SMOTE:
     upfront) so resampling only happens on training folds during CV.
     """
     return SMOTE(random_state=random_state)
+
+
+def get_smotenc(X: pd.DataFrame, random_state: int = 42) -> SMOTENC:
+    """
+    Return a SMOTENC instance with categorical feature indices auto-detected
+    from CATEGORICAL_FEATURES and the column order of X.
+
+    Why SMOTENC instead of plain SMOTE
+    ------------------------------------
+    Plain SMOTE treats ALL features as continuous and generates synthetic
+    samples by linear interpolation between k-nearest neighbours.
+    This is incorrect for nominal categorical features:
+      - Month (string): interpolating 'Feb' and 'Nov' produces a meaningless
+        fractional value.
+      - VisitorType (string): 'New_Visitor' and 'Returning_Visitor' have no
+        numeric midpoint.
+      - Weekend (bool): interpolation yields non-boolean values between 0 and 1.
+
+    SMOTENC (SMOTE for Nominal and Continuous features) handles mixed-type
+    datasets by:
+      - Numerical features: standard SMOTE interpolation between neighbours.
+      - Categorical features: selects the most frequent category among the
+        k-nearest neighbours (mode imputation), preserving valid category values.
+
+    Pipeline placement
+    ------------------
+    SMOTENC MUST be placed BEFORE the ColumnTransformer in the imblearn
+    Pipeline so it operates on the raw (pre-OHE) DataFrame where:
+      - Month and VisitorType are still strings (valid category values).
+      - Weekend is still bool.
+    After OneHotEncoding these become binary columns, making SMOTENC
+    unnecessary and equivalent to SMOTE.
+
+    Parameters
+    ----------
+    X : pd.DataFrame
+        Training feature DataFrame (pre-preprocessor). Used to detect
+        categorical column indices from CATEGORICAL_FEATURES at runtime,
+        making this robust to column reordering.
+    random_state : int
+        Seed for reproducibility.
+    """
+    cat_indices = [i for i, col in enumerate(X.columns) if col in CATEGORICAL_FEATURES]
+    return SMOTENC(categorical_features=cat_indices, random_state=random_state)
 
 
 # ---------------------------------------------------------------------------
