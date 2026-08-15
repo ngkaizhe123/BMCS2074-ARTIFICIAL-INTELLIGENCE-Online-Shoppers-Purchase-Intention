@@ -8,10 +8,12 @@ model evaluation, metrics reporting, model persistence, and SHAP explanations.
 from __future__ import annotations
 
 from pathlib import Path
+
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import shap
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -180,98 +182,175 @@ def generate_shap_explanation(
     -------
     (explainer, shap_values, figures_dict)
     """
-    try:
-        import shap
-    except ImportError:
-        raise ImportError(
-            "The 'shap' library is required for SHAP explanations. "
-            "Please install it using: pip install shap"
-        )
 
-    # 1. Determine if model is a complex ensemble (e.g. VotingClassifier) whose
-    #    sub-pipelines need raw DataFrames internally. In that case we must NOT
-    #    pre-transform X_test ourselves; instead we pass X_test as-is to the
-    #    full model's predict_proba so column names are preserved.
-    estimator_class = model.__class__.__name__.lower()
-    is_voting_ensemble = "voting" in estimator_class
+    # 1. Determine if the model contains ColumnTransformers that need
+    #    DataFrame column names (e.g. VotingClassifier with sub-Pipelines).
+    #    KernelExplainer internally converts all data to numpy arrays before
+    #    calling predict_proba, so we wrap predict_fn to restore column names.
+    is_imblearn_or_sklearn_pipeline = hasattr(model, "named_steps")
 
-    if hasattr(model, "named_steps") and not is_voting_ensemble:
-        # Standard sklearn/imblearn Pipeline: extract preprocessor + final estimator
-        if "preprocessor" in model.named_steps:
-            preprocessor = model.named_steps["preprocessor"]
-            X_test_transformed = preprocessor.transform(X_test)
-            if hasattr(X_test_transformed, "toarray"):
-                X_test_transformed = X_test_transformed.toarray()
-            if hasattr(preprocessor, "get_feature_names_out"):
-                feature_names = [str(n) for n in preprocessor.get_feature_names_out()]
-            else:
-                feature_names = [
-                    f"feature_{i}" for i in range(X_test_transformed.shape[1])
-                ]
-        else:
-            X_test_transformed = (
-                X_test.values if isinstance(X_test, pd.DataFrame) else X_test
-            )
-            feature_names = (
-                list(X_test.columns)
-                if isinstance(X_test, pd.DataFrame)
-                else [f"feature_{i}" for i in range(X_test_transformed.shape[1])]
-            )
-        estimator = model.steps[-1][1]
-    else:
-        # VotingClassifier or bare estimator: keep raw DataFrame so internal
-        # ColumnTransformers can still access columns by name.
-        estimator = model
-        X_test_transformed = X_test  # keep as DataFrame
+    if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
+        # Standard Pipeline: pre-transform X_test and explain in feature space
+        preprocessor = model.named_steps["preprocessor"]
+        X_transformed = preprocessor.transform(X_test)
+        if hasattr(X_transformed, "toarray"):
+            X_transformed = X_transformed.toarray()
         feature_names = (
+            [str(n) for n in preprocessor.get_feature_names_out()]
+            if hasattr(preprocessor, "get_feature_names_out")
+            else [f"feature_{i}" for i in range(X_transformed.shape[1])]
+        )
+        estimator = model.steps[-1][1]
+
+        estimator_name = estimator.__class__.__name__.lower()
+        if (
+            "xgb" in estimator_name
+            or "randomforest" in estimator_name
+            or "decisiontree" in estimator_name
+        ):
+            # Fast TreeExplainer path
+            explainer = shap.TreeExplainer(estimator)
+            shap_values = explainer(X_transformed)
+        else:
+            # KernelExplainer on already-transformed numpy arrays: safe, no DataFrame needed
+            n_bg = min(50, len(X_transformed))
+            n_ex = min(100, len(X_transformed))
+            idx = np.random.RandomState(42).choice(
+                len(X_transformed), n_bg, replace=False
+            )
+            background = X_transformed[idx]
+            X_explain = X_transformed[:n_ex]
+
+            predict_fn = (
+                estimator.predict_proba
+                if hasattr(estimator, "predict_proba")
+                else estimator.predict
+            )
+            explainer = shap.KernelExplainer(predict_fn, background)
+            raw = explainer.shap_values(X_explain)
+
+            if isinstance(raw, list) and len(raw) == 2:
+
+                val = raw[1]
+
+                base_val = (
+                    explainer.expected_value[1]
+                    if isinstance(explainer.expected_value, (list, np.ndarray))
+                    else explainer.expected_value
+                )
+
+            elif isinstance(raw, np.ndarray) and raw.ndim == 3:
+                print("Detected 3D SHAP output, extracting positive class")
+
+                val = raw[:, :, 1]
+                base_val = (
+                    explainer.expected_value[1]
+                    if isinstance(explainer.expected_value, (list, np.ndarray))
+                    else explainer.expected_value
+                )
+
+            else:
+
+                val = raw
+                base_val = explainer.expected_value
+
+            shap_values = shap.Explanation(
+                values=val,
+                base_values=base_val,
+                data=X_explain,
+                feature_names=feature_names,
+            )
+
+    else:
+        col_names = (
             list(X_test.columns)
             if isinstance(X_test, pd.DataFrame)
             else [f"feature_{i}" for i in range(X_test.shape[1])]
         )
 
-    # 2. Select appropriate Explainer
-    estimator_name = estimator.__class__.__name__.lower()
-    if (
-        "xgb" in estimator_name
-        or "randomforest" in estimator_name
-        or "decisiontree" in estimator_name
-    ) and not is_voting_ensemble:
-        # Fast TreeExplainer (only for single tree-based estimators, not ensembles
-        # that contain heterogeneous sub-models)
-        explainer = shap.TreeExplainer(estimator)
-        shap_values = explainer(X_test_transformed)
-    else:
-        # KernelExplainer for KNN, SVM, VotingClassifier, etc.
-        # Preserve DataFrame format so sub-pipelines can look up columns by name.
-        n_background = min(50, len(X_test_transformed))
-        n_explain = min(100, len(X_test_transformed))
+        feature_names = col_names
 
-        if isinstance(X_test_transformed, pd.DataFrame):
-            background = X_test_transformed.sample(n=n_background, random_state=42)
-            X_explain = X_test_transformed.iloc[:n_explain]
-        else:
-            idx = np.random.RandomState(42).choice(
-                len(X_test_transformed), n_background, replace=False
-            )
-            background = X_test_transformed[idx]
-            X_explain = X_test_transformed[:n_explain]
+        n_bg = min(50, len(X_test))
 
-        predict_fn = (
+        n_ex = min(100, len(X_test))
+
+        background = (
+            X_test.sample(n=n_bg, random_state=42)
+            if isinstance(X_test, pd.DataFrame)
+            else X_test[:n_bg]
+        )
+
+        X_explain = (
+            X_test.iloc[:n_ex] if isinstance(X_test, pd.DataFrame) else X_test[:n_ex]
+        )
+
+        # --- Key fix: wrap predict_proba to restore DataFrame column names ---
+
+        _base_predict = (
             model.predict_proba if hasattr(model, "predict_proba") else model.predict
         )
 
-        explainer = shap.KernelExplainer(predict_fn, background)
-        raw_shap_values = explainer.shap_values(X_explain)
+        def _predict_with_df(data):
+            """Always convert input to a DataFrame with correct column names."""
 
-        if isinstance(raw_shap_values, list) and len(raw_shap_values) == 2:
-            val = raw_shap_values[1]
+            if not isinstance(data, pd.DataFrame):
+
+                data = pd.DataFrame(data, columns=col_names)
+
+            return _base_predict(data)
+
+        explainer = shap.KernelExplainer(_predict_with_df, background)
+
+        raw = explainer.shap_values(X_explain)
+
+        print("RAW TYPE:", type(raw))
+
+        if isinstance(raw, np.ndarray):
+
+            print("RAW SHAPE:", raw.shape)
+
+        elif isinstance(raw, list):
+
+            print("LIST LENGTH:", len(raw))
+
+            for i, arr in enumerate(raw):
+
+                print(f"class {i} shape:", np.array(arr).shape)
+
+        # -------------------------------------------------------------
+
+        # 核心修复位置：将提取逻辑移到外部，确保无论 raw 是 list 还是 ndarray 都能正常给 val 赋值
+
+        # -------------------------------------------------------------
+
+        if isinstance(raw, list) and len(raw) == 2:
+
+            val = raw[1]
+
             base_val = (
                 explainer.expected_value[1]
                 if isinstance(explainer.expected_value, (list, np.ndarray))
                 else explainer.expected_value
             )
+
+        elif isinstance(raw, np.ndarray) and raw.ndim == 3:
+
+            print(
+                "[SHAP] Detected 3D SHAP output (samples, features, classes), extracting positive class (Class 1)"
+            )
+
+            val = raw[:, :, 1]
+
+            base_val = (
+                explainer.expected_value[1]
+                if isinstance(explainer.expected_value, (list, np.ndarray))
+                else explainer.expected_value
+            )
+
         else:
-            val = raw_shap_values
+
+            val = raw
+
             base_val = explainer.expected_value
 
         data_array = (
