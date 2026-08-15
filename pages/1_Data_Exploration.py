@@ -76,7 +76,7 @@ for col_name in CATEGORICAL_FEATURES:
         st.bar_chart(vc)
 
 # ── 5. Saved EDA Plots ─────────────────────────────────────────────────────
-PLOT_DIR = project_root / "report_assets" / "plots"
+PLOT_DIR = project_root / "report_assets" / "plots" / "eda"
 
 if PLOT_DIR.exists():
     png_files = sorted(PLOT_DIR.glob("*.png"))
