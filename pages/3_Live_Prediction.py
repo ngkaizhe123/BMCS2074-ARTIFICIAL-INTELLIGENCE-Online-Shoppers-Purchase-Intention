@@ -75,7 +75,7 @@ if not models:
     st.stop()
 
 # ── Sidebar: model picker ───────────────────────────────────────────────
-st.sidebar.header("🤖 Model")
+st.sidebar.header("Models")
 model_name = st.sidebar.selectbox("Choose a trained model", list(models.keys()))
 selected_info = models[model_name]
 selected_model = selected_info["model"]
