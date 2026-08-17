@@ -13,7 +13,13 @@ from sklearn.metrics import f1_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict
 from sklearn.neighbors import KNeighborsClassifier
 
-from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
+from src.data_preprocessing import (
+    CATEGORICAL_FEATURES,
+    NUMERICAL_FEATURES,
+    build_preprocessor,
+    get_smote,
+    preprocess_data,
+)
 from src.utils import (
     evaluate_model,
     generate_shap_explanation,
@@ -58,7 +64,8 @@ def train_knn_rf_ensemble(
         The final trained model (KNN + Random Forest combined).
 
     Raises:
-        ValueError: If the training data is missing or invalid.
+        ValueError: If the training data is missing, missing expected columns,
+            or if the target column contains values other than 0/1.
         RuntimeError: If training either model fails.
     """
     # ---- Basic safety checks before we start training -------------------
@@ -69,6 +76,30 @@ def train_knn_rf_ensemble(
     if y_train is None or y_train.nunique() < 2:
         raise ValueError(
             "[train_knn_rf_ensemble] y_train must contain at least 2 classes."
+        )
+
+    # Check that the data actually has all the columns this model expects
+    # (e.g. "Month", "PageValues", etc). If a column is missing, this stops
+    # training immediately with a clear message, instead of letting it fail
+    # later with a confusing error buried inside the preprocessing step.
+    expected_columns = CATEGORICAL_FEATURES + NUMERICAL_FEATURES
+    missing_columns = [col for col in expected_columns if col not in X_train.columns]
+    if missing_columns:
+        raise ValueError(
+            "[train_knn_rf_ensemble] X_train is missing expected column(s): "
+            f"{missing_columns}. Expected columns: {expected_columns}."
+        )
+
+    # Check that the target column only contains 0 and 1 (the model expects
+    # "did they purchase or not" as 0/1, not True/False, "Yes"/"No", or
+    # anything else).
+    allowed_labels = {0, 1}
+    actual_labels = set(y_train.unique())
+    if not actual_labels.issubset(allowed_labels):
+        raise ValueError(
+            "[train_knn_rf_ensemble] y_train must only contain 0 and 1 "
+            f"(found: {sorted(actual_labels)}). Convert your target column to "
+            "0/1 (e.g. using .astype(int)) before calling this function."
         )
 
     # Default settings to try during tuning, if the caller didn't provide their own.
@@ -228,4 +259,5 @@ if __name__ == "__main__":
             show=False,
         )
     except Exception as e:
-        print(f"[SHAP] Skipped generating explanation charts: {e}")
+        print(f"[SHAP] Skip generating explanation charts: {e}")
+    
