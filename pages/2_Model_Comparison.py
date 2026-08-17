@@ -19,6 +19,7 @@ st.markdown("---")
 
 # ── Auto-detect saved models ───────────────────────────────────────────────
 SAVED_DIR = project_root / "saved_models"
+PLOT_DIR = project_root / "report_assets" / "plots"
 
 
 @st.cache_resource
@@ -35,7 +36,11 @@ def discover_models():
             try:
                 model = joblib.load(pkl)
                 nice_name = pkl.stem.replace("_", " ").title()
-                models[nice_name] = {"path": pkl, "model": model}
+                models[nice_name] = {
+                    "path": pkl,
+                    "model": model,
+                    "stem": pkl.stem.split("_")[0],
+                }
             except Exception as e:
                 st.warning(f"⚠️ Failed to load `{pkl.name}`: {e}")
     return models
@@ -82,7 +87,7 @@ for name, info in models.items():
                 "AUC": metrics["AUC"] if metrics["AUC"] is not None else "N/A",
             }
         )
-        detail_metrics[name] = metrics
+        detail_metrics[name] = {"metrics": metrics, "stem": info["stem"]}
     except Exception as e:
         st.warning(f"⚠️ Could not evaluate **{name}**: {e}")
 
@@ -103,10 +108,13 @@ if results:
     chart_df = summary_df[chart_cols]
     st.bar_chart(chart_df)
 
-    # ── Per-model details ──────────────────────────────────────────────────
-    st.header("Detailed Reports")
-    for name, metrics in detail_metrics.items():
-        with st.expander(f"📄 {name}"):
+    # ── Per-model details & SHAP Explanations ───────────────────────────────
+    st.header("Detailed Reports & SHAP Interpretability")
+    for name, item in detail_metrics.items():
+        metrics = item["metrics"]
+        stem = item["stem"]
+
+        with st.expander(f"📄 {name} Details & Interpretability", expanded=False):
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Confusion Matrix")
@@ -120,3 +128,15 @@ if results:
             with col2:
                 st.subheader("Classification Report")
                 st.text(metrics["Classification Report"])
+
+            # Check if SHAP plots exist for this model
+            if PLOT_DIR.exists():
+                shap_plots = list(PLOT_DIR.glob(f"{stem}_shap_*.png"))
+                if shap_plots:
+                    st.markdown("---")
+                    st.subheader(f"🧠 SHAP Model Explanations ({name})")
+                    for img_file in sorted(shap_plots):
+                        plot_title = img_file.stem.replace("_", " ").title()
+                        st.image(
+                            str(img_file), caption=plot_title, use_container_width=True
+                        )

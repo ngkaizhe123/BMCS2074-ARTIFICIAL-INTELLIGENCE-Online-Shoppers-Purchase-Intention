@@ -56,7 +56,7 @@ Use the **sidebar** on the left to explore:
 saved_dir = project_root / "saved_models"
 pkl_files = sorted(saved_dir.glob("*.pkl")) if saved_dir.exists() else []
 
-st.sidebar.markdown("### 🤖 Detected Models")
+st.sidebar.markdown("### Detected Models")
 if pkl_files:
     for p in pkl_files:
         st.sidebar.success(f"✅  `{p.name}`")
