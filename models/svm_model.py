@@ -89,10 +89,10 @@ sns.set_style("whitegrid")
 # beats rbf/linear on this dataset and multiplies search time via the extra
 # 'degree' axis. Pass a custom param_grid to explore it if needed.
 DEFAULT_PARAM_GRID = {
-    "svm__C": [0.1, 1, 10],
+    "svm__C": [0.1, 1, 10,50,100],
     "svm__kernel": ["rbf", "linear"],
-    "svm__gamma": ["scale", "auto"],
-    "svm__class_weight": [None, "balanced"],
+    "svm__gamma": ["scale", "auto",0.01,0.1],
+    "svm__class_weight": ["balanced"],
 }
 
 
@@ -630,16 +630,16 @@ if __name__ == "__main__":
     # generate_shap_explanation() automatically uses KernelExplainer for SVC
     # (non-tree estimator), operating on already-transformed numpy arrays
     # (post-preprocessor) so no DataFrame column passthrough is needed.
-    print("\n[__main__] Generating SVM SHAP explanation plots...")
-    try:
-        generate_shap_explanation(
-            model=model,
-            X_test=X_test,
-            max_display=15,
-            save_dir=PLOT_DIR,
-            prefix="svm_",
-            show=False,
-        )
-        print("[__main__] SHAP plots saved successfully.")
-    except Exception as exc:
-        print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
+    # print("\n[__main__] Generating SVM SHAP explanation plots...")
+    # try:
+    #     generate_shap_explanation(
+    #         model=model,
+    #         X_test=X_test,
+    #         max_display=15,
+    #         save_dir=PLOT_DIR,
+    #         prefix="svm_",
+    #         show=False,
+    #     )
+    #     print("[__main__] SHAP plots saved successfully.")
+    # except Exception as exc:
+    #     print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
