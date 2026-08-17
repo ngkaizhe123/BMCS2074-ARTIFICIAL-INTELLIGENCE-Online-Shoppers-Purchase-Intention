@@ -79,6 +79,7 @@ from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, preprocess_data
 from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
+from scipy.stats import loguniform
 
 sns.set_style("whitegrid")
 
@@ -88,12 +89,34 @@ sns.set_style("whitegrid")
 # NOTE: 'poly' is intentionally left out of the default grid — it rarely
 # beats rbf/linear on this dataset and multiplies search time via the extra
 # 'degree' axis. Pass a custom param_grid to explore it if needed.
-DEFAULT_PARAM_GRID = {
-    "svm__C": [0.1, 1, 10,50,100],
-    "svm__kernel": ["rbf", "linear"],
-    "svm__gamma": ["scale", "auto",0.01,0.1],
-    "svm__class_weight": ["balanced"],
-}
+SVM_PARAM_DISTRIBUTIONS = [
+    # RBF kernel
+    {
+        "svm__kernel": ["rbf"],
+        "svm__C": loguniform(0.1, 300),
+        "svm__gamma": loguniform(1e-4, 1),
+        "svm__class_weight": [
+            None,
+            "balanced",
+            {0: 1, 1: 1.5},
+            {0: 1, 1: 2},
+            {0: 1, 1: 3},
+        ],
+    },
+
+    # Linear kernel
+    {
+        "svm__kernel": ["linear"],
+        "svm__C": loguniform(0.01, 300),
+        "svm__class_weight": [
+            None,
+            "balanced",
+            {0: 1, 1: 1.5},
+            {0: 1, 1: 2},
+            {0: 1, 1: 3},
+        ],
+    },
+]
 
 
 def _save_show(fig: plt.Figure, name: str, save_dir: str | None, show: bool) -> None:
@@ -152,10 +175,10 @@ def train_svm(
     random_state: int = 42,
     output_path: str | Path | None = "saved_models/svm_model.pkl",
     verbose: int = 2,
-    n_jobs: int = -1,
+    n_jobs: int = -2,
 ):
     pipeline = build_svm_pipeline(use_smote=use_smote, random_state=random_state)
-    grid = param_grid or DEFAULT_PARAM_GRID
+    grid = param_grid or SVM_PARAM_DISTRIBUTIONS
     stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
 
     if search == "random":
@@ -287,7 +310,7 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
     }
 
     cv_results = cross_validate(
-        model, X, y, cv=stratified_cv, scoring=scoring, n_jobs=-1, return_train_score=False
+        model, X, y, cv=stratified_cv, scoring=scoring, n_jobs=-2, return_train_score=False
     )
 
     rows = []
@@ -353,7 +376,7 @@ def get_svm_feature_importance(
         )
 
     result = permutation_importance(
-        model, X_sample, y_sample, n_repeats=n_repeats, random_state=random_state, n_jobs=-1
+        model, X_sample, y_sample, n_repeats=n_repeats, random_state=random_state, n_jobs=-2
     )
 
     # Safely retrieve feature names from DataFrame or generate generic names
@@ -451,7 +474,7 @@ def plot_svm_learning_curve(
             y,
             cv=cv,
             scoring=scoring,
-            n_jobs=-1,
+            n_jobs=-2,
             train_sizes=np.linspace(0.1, 1.0, 6),
             random_state=42,
         )
@@ -598,7 +621,7 @@ if __name__ == "__main__":
 
     # ── 2. Train & save ─────────────────────────────────────────────────────
     save_path = project_root / "saved_models" / "svm_model.pkl"
-    model, search_obj = train_svm(X_train, y_train, output_path=save_path)
+    model, search_obj = train_svm(X_train, y_train, output_path=save_path,param_grid=SVM_PARAM_DISTRIBUTIONS,)
 
     # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
@@ -630,16 +653,16 @@ if __name__ == "__main__":
     # generate_shap_explanation() automatically uses KernelExplainer for SVC
     # (non-tree estimator), operating on already-transformed numpy arrays
     # (post-preprocessor) so no DataFrame column passthrough is needed.
-    # print("\n[__main__] Generating SVM SHAP explanation plots...")
-    # try:
-    #     generate_shap_explanation(
-    #         model=model,
-    #         X_test=X_test,
-    #         max_display=15,
-    #         save_dir=PLOT_DIR,
-    #         prefix="svm_",
-    #         show=False,
-    #     )
-    #     print("[__main__] SHAP plots saved successfully.")
-    # except Exception as exc:
-    #     print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
+    print("\n[__main__] Generating SVM SHAP explanation plots...")
+    try:
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            max_display=15,
+            save_dir=PLOT_DIR,
+            prefix="svm_",
+            show=False,
+        )
+        print("[__main__] SHAP plots saved successfully.")
+    except Exception as exc:
+        print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
