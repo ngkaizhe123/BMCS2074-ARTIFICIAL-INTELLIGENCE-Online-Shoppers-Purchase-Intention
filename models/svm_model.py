@@ -82,7 +82,7 @@ from sklearn.model_selection import (
 from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, preprocess_data
-from src.utils import evaluate_model, print_metrics, save_model
+from src.utils import evaluate_model, print_metrics, save_model, generate_shap_explanation
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.svm import SVC
 from imblearn.pipeline import Pipeline
@@ -140,7 +140,7 @@ def train_svm(
     use_smote: bool = True,
     param_grid: dict | None = None,
     scoring: str = "f1",
-    cv: int = 3,
+    cv: int = 5,
     search: str = "random",
     n_iter: int = 8,
     random_state: int = 42,
