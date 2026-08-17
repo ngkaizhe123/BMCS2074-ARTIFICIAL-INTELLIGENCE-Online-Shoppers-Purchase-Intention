@@ -78,7 +78,12 @@ from sklearn.model_selection import (
 from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, preprocess_data
-from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
+from src.utils import (
+    evaluate_model,
+    generate_shap_explanation,
+    print_metrics,
+    save_model,
+)
 from scipy.stats import loguniform
 
 sns.set_style("whitegrid")
@@ -103,7 +108,6 @@ SVM_PARAM_DISTRIBUTIONS = [
             {0: 1, 1: 3},
         ],
     },
-
     # Linear kernel
     {
         "svm__kernel": ["linear"],
@@ -179,7 +183,9 @@ def train_svm(
 ):
     pipeline = build_svm_pipeline(use_smote=use_smote, random_state=random_state)
     grid = param_grid or SVM_PARAM_DISTRIBUTIONS
-    stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
+    stratified_cv = StratifiedKFold(
+        n_splits=cv, shuffle=True, random_state=random_state
+    )
 
     if search == "random":
         search_obj = RandomizedSearchCV(
@@ -288,7 +294,9 @@ def plot_svm_hyperparameter_heatmap(search_obj, save_dir=None, show=True):
 # ---------------------------------------------------------------------------
 
 
-def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 42) -> pd.DataFrame:
+def cross_validate_svm(
+    model: Pipeline, X, y, cv: int = 5, random_state: int = 42
+) -> pd.DataFrame:
     """Run stratified k-fold CV on the already-tuned SVM pipeline and return
     per-fold + mean/std Accuracy, Precision, Recall, F1 and AUC.
 
@@ -300,7 +308,9 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
     AUC scoring requires ``predict_proba``; because the pipeline is wrapped
     in ``CalibratedClassifierCV`` this is always available.
     """
-    stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
+    stratified_cv = StratifiedKFold(
+        n_splits=cv, shuffle=True, random_state=random_state
+    )
     scoring = {
         "accuracy": "accuracy",
         "precision": "precision",
@@ -310,7 +320,13 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
     }
 
     cv_results = cross_validate(
-        model, X, y, cv=stratified_cv, scoring=scoring, n_jobs=-2, return_train_score=False
+        model,
+        X,
+        y,
+        cv=stratified_cv,
+        scoring=scoring,
+        n_jobs=-2,
+        return_train_score=False,
     )
 
     rows = []
@@ -333,7 +349,11 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
 
 
 def get_svm_feature_importance(
-    model: Pipeline, X_sample, y_sample=None, n_repeats: int = 10, random_state: int = 42
+    model: Pipeline,
+    X_sample,
+    y_sample=None,
+    n_repeats: int = 10,
+    random_state: int = 42,
 ) -> pd.DataFrame:
     """Return a DataFrame of feature importances for the fitted SVM pipeline.
 
@@ -376,7 +396,12 @@ def get_svm_feature_importance(
         )
 
     result = permutation_importance(
-        model, X_sample, y_sample, n_repeats=n_repeats, random_state=random_state, n_jobs=-2
+        model,
+        X_sample,
+        y_sample,
+        n_repeats=n_repeats,
+        random_state=random_state,
+        n_jobs=-2,
     )
 
     # Safely retrieve feature names from DataFrame or generate generic names
@@ -418,7 +443,9 @@ def plot_svm_feature_importance(
         ax.barh(top["Feature"], top["Importance"], color="#4C72B0")
         ax.set_xlabel("Importance")
         ax.set_title(
-            f"SVM — Feature Importance\n({method_label})", fontsize=12, fontweight="bold"
+            f"SVM — Feature Importance\n({method_label})",
+            fontsize=12,
+            fontweight="bold",
         )
         plt.tight_layout()
         _save_show(fig, "15_svm_feature_importance", save_dir, show)
@@ -491,7 +518,9 @@ def plot_svm_learning_curve(
             alpha=0.15,
             color="#4C72B0",
         )
-        ax.plot(train_sizes, val_mean, "o-", color="#DD8452", label="Cross-validation score")
+        ax.plot(
+            train_sizes, val_mean, "o-", color="#DD8452", label="Cross-validation score"
+        )
         ax.fill_between(
             train_sizes,
             val_mean - val_std,
@@ -547,9 +576,15 @@ def generate_svm_report(
 
     # Safely extract probability estimates for downstream plots
     try:
-        y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+        y_prob = (
+            model.predict_proba(X_test)[:, 1]
+            if hasattr(model, "predict_proba")
+            else None
+        )
     except Exception as exc:
-        print(f"[generate_svm_report] predict_proba failed: {exc}. AUC plots will be skipped.")
+        print(
+            f"[generate_svm_report] predict_proba failed: {exc}. AUC plots will be skipped."
+        )
         y_prob = None
 
     # --- Confusion Matrix ---------------------------------------------------
@@ -599,7 +634,9 @@ def generate_svm_report(
     if X_importance is not None:
         print("[generate_svm_report] Computing & plotting feature importance...")
         try:
-            importance_df = get_svm_feature_importance(model, X_importance, y_importance)
+            importance_df = get_svm_feature_importance(
+                model, X_importance, y_importance
+            )
             base_metrics["Feature Importance"] = importance_df
             plot_svm_feature_importance(importance_df, save_dir=save_dir, show=show)
         except Exception as exc:
@@ -621,7 +658,12 @@ if __name__ == "__main__":
 
     # ── 2. Train & save ─────────────────────────────────────────────────────
     save_path = project_root / "saved_models" / "svm_model.pkl"
-    model, search_obj = train_svm(X_train, y_train, output_path=save_path,param_grid=SVM_PARAM_DISTRIBUTIONS,)
+    model, search_obj = train_svm(
+        X_train,
+        y_train,
+        output_path=save_path,
+        param_grid=SVM_PARAM_DISTRIBUTIONS,
+    )
 
     # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
