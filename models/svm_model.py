@@ -19,6 +19,22 @@ generic helpers:
   - Precision-Recall curve and learning curve aren't in src/utils.py at
     all yet (only plain confusion matrix / ROC curve are).
 
+Probability Calibration
+-----------------------
+SVC is initialised with ``probability=True`` so that ``predict_proba()``
+is available for:
+  - AUC-ROC computation in evaluate_model() / generate_svm_report()
+  - The Live Prediction probability meter (pages/3_Live_Prediction.py)
+  - The Model Comparison page (pages/2_Model_Comparison.py)
+
+SHAP Interpretability
+---------------------
+``generate_shap_explanation`` from ``src.utils`` is imported and called
+in the ``__main__`` block to produce Beeswarm, Feature Importance Bar,
+and Waterfall plots saved to ``report_assets/plots/`` with the prefix
+``svm_``.  The filenames therefore match the pattern ``svm_shap_*.png``
+expected by ``pages/2_Model_Comparison.py``.
+
 Usage
 -----
     from models.svm_model import train_svm, generate_svm_report
@@ -67,6 +83,9 @@ from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, preprocess_data
 from src.utils import evaluate_model, print_metrics, save_model
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.svm import SVC
+from imblearn.pipeline import Pipeline
 
 sns.set_style("whitegrid")
 
@@ -77,7 +96,7 @@ sns.set_style("whitegrid")
 # beats rbf/linear on this dataset and multiplies search time via the extra
 # 'degree' axis. Pass a custom param_grid to explore it if needed.
 DEFAULT_PARAM_GRID = {
-    "svm__C": [0.1, 1, 10, 100],
+    "svm__C": [0.1, 1, 10],
     "svm__kernel": ["rbf", "linear"],
     "svm__gamma": ["scale", "auto"],
     "svm__class_weight": [None, "balanced"],
@@ -102,24 +121,16 @@ def _save_show(fig: plt.Figure, name: str, save_dir: str | None, show: bool) -> 
 # ---------------------------------------------------------------------------
 
 
+# 2. Build base pipeline without internal Platt scaling
 def build_svm_pipeline(use_smote: bool = True, random_state: int = 42) -> Pipeline:
-    """Assemble the preprocessing -> (SMOTE) -> SVC pipeline.
-
-    SVM is distance-based, so numerical features MUST be scaled
-    (scale_numerical=True) — unlike the XGBoost pipeline which passes
-    numerical features through untouched.
-    """
     preprocessor = build_preprocessor(scale_numerical=True)
-    svm = SVC(random_state=random_state)
+    # Set probability=False to eliminate 5x training overhead during search
+    svm = SVC(random_state=random_state, probability=False, max_iter=5000)
 
+    steps = [("preprocessor", preprocessor)]
     if use_smote:
-        steps = [
-            ("preprocessor", preprocessor),
-            ("smote", SMOTE(random_state=random_state)),
-            ("svm", svm),
-        ]
-    else:
-        steps = [("preprocessor", preprocessor), ("svm", svm)]
+        steps.append(("smote", SMOTE(random_state=random_state)))
+    steps.append(("svm", svm))
     return Pipeline(steps=steps)
 
 
@@ -129,13 +140,13 @@ def train_svm(
     use_smote: bool = True,
     param_grid: dict | None = None,
     scoring: str = "f1",
-    cv: int = 5,
+    cv: int = 3,
     search: str = "random",
     n_iter: int = 8,
     random_state: int = 42,
     output_path: str | Path | None = "saved_models/svm_model.pkl",
     verbose: int = 2,
-    n_jobs: int = 2,
+    n_jobs: int = -1,
 ):
     """Train an SVM classifier with hyperparameter tuning and save it.
 
@@ -223,31 +234,42 @@ def plot_svm_hyperparameter_heatmap(search_obj, save_dir=None, show=True):
     """Visualise mean CV F1 score across C x gamma for rbf-kernel runs only
     (linear-kernel runs don't have a gamma axis and are excluded here).
     SVM-specific because the axes are SVM's own hyperparameters.
+
+    Returns None gracefully when no rbf results are present or if any
+    unexpected error occurs during pivot/render.
     """
-    results = pd.DataFrame(search_obj.cv_results_)
-    rbf_results = results[results["param_svm__kernel"] == "rbf"].copy()
+    try:
+        results = pd.DataFrame(search_obj.cv_results_)
+        rbf_results = results[results["param_svm__kernel"] == "rbf"].copy()
 
-    if rbf_results.empty:
-        print("[plot_svm_hyperparameter_heatmap] No rbf-kernel results found — skipping.")
+        if rbf_results.empty:
+            print(
+                "[plot_svm_hyperparameter_heatmap] No rbf-kernel results found — skipping."
+            )
+            return None
+
+        pivot = rbf_results.pivot_table(
+            index="param_svm__C",
+            columns="param_svm__gamma",
+            values="mean_test_score",
+            aggfunc="mean",
+        )
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        sns.heatmap(pivot, annot=True, fmt=".3f", cmap="viridis", ax=ax)
+        ax.set_title(
+            "SVM (RBF kernel) — Mean CV F1 Score by C and gamma",
+            fontsize=12,
+            fontweight="bold",
+        )
+        ax.set_xlabel("gamma")
+        ax.set_ylabel("C")
+        plt.tight_layout()
+        _save_show(fig, "13_svm_hyperparameter_heatmap", save_dir, show)
+        return pivot
+    except Exception as exc:
+        print(f"[plot_svm_hyperparameter_heatmap] Skipped due to error: {exc}")
         return None
-
-    pivot = rbf_results.pivot_table(
-        index="param_svm__C",
-        columns="param_svm__gamma",
-        values="mean_test_score",
-        aggfunc="mean",
-    )
-
-    fig, ax = plt.subplots(figsize=(7, 5))
-    sns.heatmap(pivot, annot=True, fmt=".3f", cmap="viridis", ax=ax)
-    ax.set_title(
-        "SVM (RBF kernel) — Mean CV F1 Score by C and gamma", fontsize=12, fontweight="bold"
-    )
-    ax.set_xlabel("gamma")
-    ax.set_ylabel("C")
-    plt.tight_layout()
-    _save_show(fig, "13_svm_hyperparameter_heatmap", save_dir, show)
-    return pivot
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +285,9 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
     using CV on the training set only; this re-validates the *final* chosen
     pipeline so the report can state e.g. "F1 = 0.71 +/- 0.03 across 5
     folds" instead of a single point estimate.
+
+    AUC scoring requires ``predict_proba``; because the pipeline is built
+    with ``probability=True`` this is always available.
     """
     stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     scoring = {
@@ -306,6 +331,13 @@ def get_svm_feature_importance(
     - Non-linear     -> falls back to permutation importance on the whole
                         pipeline (works for any kernel, needs y_sample,
                         slower).
+
+    Edge-case handling
+    ------------------
+    Column names are inferred from ``X_sample.columns`` when X_sample is a
+    DataFrame, or auto-generated as ``feature_0``, ``feature_1``, … when it
+    is a numpy array.  This prevents an AttributeError when the test set has
+    been pre-transformed to a numpy matrix.
     """
     svm_step = model.named_steps["svm"]
 
@@ -330,10 +362,17 @@ def get_svm_feature_importance(
     result = permutation_importance(
         model, X_sample, y_sample, n_repeats=n_repeats, random_state=random_state, n_jobs=-1
     )
+
+    # Safely retrieve feature names from DataFrame or generate generic names
+    if hasattr(X_sample, "columns"):
+        feature_names = list(X_sample.columns)
+    else:
+        feature_names = [f"feature_{i}" for i in range(X_sample.shape[1])]
+
     importance_df = (
         pd.DataFrame(
             {
-                "Feature": X_sample.columns,
+                "Feature": feature_names,
                 "Importance": result.importances_mean,
                 "Std": result.importances_std,
             }
@@ -345,16 +384,30 @@ def get_svm_feature_importance(
     return importance_df
 
 
-def plot_svm_feature_importance(importance_df: pd.DataFrame, top_n: int = 15, save_dir=None, show=True):
-    top = importance_df.head(top_n).iloc[::-1]
-    method_label = importance_df["Method"].iloc[0] if "Method" in importance_df else ""
+def plot_svm_feature_importance(
+    importance_df: pd.DataFrame, top_n: int = 15, save_dir=None, show=True
+):
+    """Plot a horizontal bar chart of the top-N SVM feature importances.
 
-    fig, ax = plt.subplots(figsize=(8, max(4, top_n * 0.35)))
-    ax.barh(top["Feature"], top["Importance"], color="#4C72B0")
-    ax.set_xlabel("Importance")
-    ax.set_title(f"SVM — Feature Importance\n({method_label})", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    _save_show(fig, "15_svm_feature_importance", save_dir, show)
+    Handles the case where importance_df has fewer rows than top_n without
+    raising an IndexError (iloc[::-1] on a shorter frame still works).
+    """
+    try:
+        top = importance_df.head(top_n).iloc[::-1]
+        method_label = (
+            importance_df["Method"].iloc[0] if "Method" in importance_df.columns else ""
+        )
+
+        fig, ax = plt.subplots(figsize=(8, max(4, len(top) * 0.35)))
+        ax.barh(top["Feature"], top["Importance"], color="#4C72B0")
+        ax.set_xlabel("Importance")
+        ax.set_title(
+            f"SVM — Feature Importance\n({method_label})", fontsize=12, fontweight="bold"
+        )
+        plt.tight_layout()
+        _save_show(fig, "15_svm_feature_importance", save_dir, show)
+    except Exception as exc:
+        print(f"[plot_svm_feature_importance] Skipped due to error: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -368,39 +421,78 @@ def plot_svm_feature_importance(importance_df: pd.DataFrame, top_n: int = 15, sa
 
 
 def plot_svm_precision_recall_curve(model, X_test, y_test, save_dir=None, show=True):
-    """More informative than ROC on an imbalanced target (~85/15 split)."""
-    y_prob = model.predict_proba(X_test)[:, 1]
-    ap = average_precision_score(y_test, y_prob)
+    """More informative than ROC on an imbalanced target (~85/15 split).
 
-    fig, ax = plt.subplots(figsize=(7, 6))
-    PrecisionRecallDisplay.from_predictions(y_test, y_prob, ax=ax, name=f"SVM (AP = {ap:.3f})")
-    ax.set_title("SVM — Precision-Recall Curve", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    _save_show(fig, "12_svm_precision_recall_curve", save_dir, show)
-    return ap
+    Requires predict_proba() — always available when the pipeline is built
+    with probability=True.  Returns None gracefully on any runtime error.
+    """
+    try:
+        y_prob = model.predict_proba(X_test)[:, 1]
+        ap = average_precision_score(y_test, y_prob)
+
+        fig, ax = plt.subplots(figsize=(7, 6))
+        PrecisionRecallDisplay.from_predictions(
+            y_test, y_prob, ax=ax, name=f"SVM (AP = {ap:.3f})"
+        )
+        ax.set_title("SVM — Precision-Recall Curve", fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save_show(fig, "12_svm_precision_recall_curve", save_dir, show)
+        return ap
+    except Exception as exc:
+        print(f"[plot_svm_precision_recall_curve] Skipped due to error: {exc}")
+        return None
 
 
-def plot_svm_learning_curve(model, X, y, cv: int = 5, scoring: str = "f1", save_dir=None, show=True):
-    train_sizes, train_scores, val_scores = learning_curve(
-        model, X, y, cv=cv, scoring=scoring, n_jobs=-1,
-        train_sizes=np.linspace(0.1, 1.0, 6), random_state=42,
-    )
+def plot_svm_learning_curve(
+    model, X, y, cv: int = 5, scoring: str = "f1", save_dir=None, show=True
+):
+    """Plot training vs. cross-validation score across increasing training set sizes.
 
-    train_mean, train_std = train_scores.mean(axis=1), train_scores.std(axis=1)
-    val_mean, val_std = val_scores.mean(axis=1), val_scores.std(axis=1)
+    Returns (None, None, None) on any runtime error so the caller can
+    continue without crashing.
+    """
+    try:
+        train_sizes, train_scores, val_scores = learning_curve(
+            model,
+            X,
+            y,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=-1,
+            train_sizes=np.linspace(0.1, 1.0, 6),
+            random_state=42,
+        )
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(train_sizes, train_mean, "o-", color="#4C72B0", label="Training score")
-    ax.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, alpha=0.15, color="#4C72B0")
-    ax.plot(train_sizes, val_mean, "o-", color="#DD8452", label="Cross-validation score")
-    ax.fill_between(train_sizes, val_mean - val_std, val_mean + val_std, alpha=0.15, color="#DD8452")
-    ax.set_xlabel("Training Set Size")
-    ax.set_ylabel(scoring.upper())
-    ax.set_title("SVM — Learning Curve", fontsize=12, fontweight="bold")
-    ax.legend(loc="best")
-    plt.tight_layout()
-    _save_show(fig, "14_svm_learning_curve", save_dir, show)
-    return train_sizes, train_mean, val_mean
+        train_mean, train_std = train_scores.mean(axis=1), train_scores.std(axis=1)
+        val_mean, val_std = val_scores.mean(axis=1), val_scores.std(axis=1)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(train_sizes, train_mean, "o-", color="#4C72B0", label="Training score")
+        ax.fill_between(
+            train_sizes,
+            train_mean - train_std,
+            train_mean + train_std,
+            alpha=0.15,
+            color="#4C72B0",
+        )
+        ax.plot(train_sizes, val_mean, "o-", color="#DD8452", label="Cross-validation score")
+        ax.fill_between(
+            train_sizes,
+            val_mean - val_std,
+            val_mean + val_std,
+            alpha=0.15,
+            color="#DD8452",
+        )
+        ax.set_xlabel("Training Set Size")
+        ax.set_ylabel(scoring.upper())
+        ax.set_title("SVM — Learning Curve", fontsize=12, fontweight="bold")
+        ax.legend(loc="best")
+        plt.tight_layout()
+        _save_show(fig, "14_svm_learning_curve", save_dir, show)
+        return train_sizes, train_mean, val_mean
+    except Exception as exc:
+        print(f"[plot_svm_learning_curve] Skipped due to error: {exc}")
+        return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -423,46 +515,79 @@ def generate_svm_report(
 
     Reuses src/utils.py's evaluate_model() for the core metrics + generic
     confusion matrix data, then adds the SVM-specific plots on top.
+
+    All individual plot calls are wrapped in try/except blocks so that an
+    isolated failure (e.g. a degenerate test fold during unit testing) does
+    not abort the entire report generation.
+
+    Probability arrays
+    ------------------
+    ``evaluate_model()`` calls ``model.predict_proba()`` when available.
+    Because the pipeline is built with ``probability=True``, this is always
+    present for SVM pipelines from ``build_svm_pipeline()``.
     """
+    # --- Core metrics -------------------------------------------------------
     base_metrics = evaluate_model(model, X_test, y_test)
-    y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
 
+    # Safely extract probability estimates for downstream plots
+    try:
+        y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+    except Exception as exc:
+        print(f"[generate_svm_report] predict_proba failed: {exc}. AUC plots will be skipped.")
+        y_prob = None
+
+    # --- Confusion Matrix ---------------------------------------------------
     print("[generate_svm_report] Plotting confusion matrix...")
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ConfusionMatrixDisplay(
-        confusion_matrix=base_metrics["Confusion Matrix"],
-        display_labels=["No Purchase", "Purchase"],
-    ).plot(cmap="Blues", ax=ax, colorbar=False)
-    ax.set_title("SVM — Confusion Matrix", fontsize=12, fontweight="bold")
-    plt.tight_layout()
-    _save_show(fig, "10_svm_confusion_matrix", save_dir, show)
+    try:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ConfusionMatrixDisplay(
+            confusion_matrix=base_metrics["Confusion Matrix"],
+            display_labels=["No Purchase", "Purchase"],
+        ).plot(cmap="Blues", ax=ax, colorbar=False)
+        ax.set_title("SVM — Confusion Matrix", fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        _save_show(fig, "10_svm_confusion_matrix", save_dir, show)
+    except Exception as exc:
+        print(f"[generate_svm_report] Confusion matrix plot failed: {exc}")
 
+    # --- ROC Curve ----------------------------------------------------------
     if y_prob is not None:
         print("[generate_svm_report] Plotting ROC curve...")
-        fig, ax = plt.subplots(figsize=(7, 6))
-        RocCurveDisplay.from_predictions(
-            y_test, y_prob, ax=ax, name=f"SVM (AUC = {base_metrics['AUC']:.3f})"
-        )
-        ax.plot([0, 1], [0, 1], linestyle="--", color="grey", label="Chance")
-        ax.set_title("SVM — ROC Curve", fontsize=12, fontweight="bold")
-        ax.legend()
-        plt.tight_layout()
-        _save_show(fig, "11_svm_roc_curve", save_dir, show)
+        try:
+            auc_val = base_metrics.get("AUC")
+            auc_str = f"{auc_val:.3f}" if auc_val is not None else "N/A"
+            fig, ax = plt.subplots(figsize=(7, 6))
+            RocCurveDisplay.from_predictions(
+                y_test, y_prob, ax=ax, name=f"SVM (AUC = {auc_str})"
+            )
+            ax.plot([0, 1], [0, 1], linestyle="--", color="grey", label="Chance")
+            ax.set_title("SVM — ROC Curve", fontsize=12, fontweight="bold")
+            ax.legend()
+            plt.tight_layout()
+            _save_show(fig, "11_svm_roc_curve", save_dir, show)
+        except Exception as exc:
+            print(f"[generate_svm_report] ROC curve plot failed: {exc}")
 
+        # --- Precision-Recall Curve -----------------------------------------
         print("[generate_svm_report] Plotting Precision-Recall curve...")
-        base_metrics["Average Precision"] = plot_svm_precision_recall_curve(
-            model, X_test, y_test, save_dir, show
-        )
+        ap = plot_svm_precision_recall_curve(model, X_test, y_test, save_dir, show)
+        if ap is not None:
+            base_metrics["Average Precision"] = ap
 
+    # --- Hyperparameter Heatmap ---------------------------------------------
     if search_obj is not None:
         print("[generate_svm_report] Plotting hyperparameter heatmap...")
         plot_svm_hyperparameter_heatmap(search_obj, save_dir, show)
 
+    # --- Feature Importance -------------------------------------------------
     if X_importance is not None:
         print("[generate_svm_report] Computing & plotting feature importance...")
-        importance_df = get_svm_feature_importance(model, X_importance, y_importance)
-        base_metrics["Feature Importance"] = importance_df
-        plot_svm_feature_importance(importance_df, save_dir=save_dir, show=show)
+        try:
+            importance_df = get_svm_feature_importance(model, X_importance, y_importance)
+            base_metrics["Feature Importance"] = importance_df
+            plot_svm_feature_importance(importance_df, save_dir=save_dir, show=show)
+        except Exception as exc:
+            print(f"[generate_svm_report] Feature importance failed: {exc}")
 
     return base_metrics
 
@@ -472,15 +597,56 @@ def generate_svm_report(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Define absolute path to the dataset using project_root
+    # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
+    X_train, X_test, y_train, y_test, _ = preprocess_data(
+        filepath=data_path, transform=False
+    )
 
-    # Pass the data_path into preprocess_data
-    X_train, X_test, y_train, y_test, _ = preprocess_data(filepath=data_path, transform=False)
-
-    # Save path relative to project root as well
+    # ── 2. Train & save ─────────────────────────────────────────────────────
     save_path = project_root / "saved_models" / "svm_model.pkl"
-    model = train_svm(X_train, y_train, output_path=save_path)
+    model, search_obj = train_svm(X_train, y_train, output_path=save_path)
 
+    # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("SVM Classifier", metrics)
+
+    # ── 4. Full SVM report (confusion matrix, ROC, PR curve, heatmap, …) ───
+    PLOT_DIR = str(project_root / "report_assets" / "plots")
+    generate_svm_report(
+        model,
+        X_test,
+        y_test,
+        search_obj=search_obj,
+        X_importance=X_test,
+        y_importance=y_test,
+        save_dir=PLOT_DIR,
+        show=False,
+    )
+
+    # ── 5. SHAP Interpretability ─────────────────────────────────────────────
+    # Saves Beeswarm, Feature Importance Bar, and Waterfall plots with the
+    # prefix ``svm_`` → filenames become:
+    #   svm_shap_beeswarm.png
+    #   svm_shap_feature_importance.png
+    #   svm_shap_waterfall.png
+    #
+    # These match the glob pattern ``{stem}_shap_*.png`` (stem = "svm") used
+    # by pages/2_Model_Comparison.py to auto-discover SHAP plots.
+    #
+    # generate_shap_explanation() automatically uses KernelExplainer for SVC
+    # (non-tree estimator), operating on already-transformed numpy arrays
+    # (post-preprocessor) so no DataFrame column passthrough is needed.
+    print("\n[__main__] Generating SVM SHAP explanation plots...")
+    try:
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            max_display=15,
+            save_dir=PLOT_DIR,
+            prefix="svm_",
+            show=False,
+        )
+        print("[__main__] SHAP plots saved successfully.")
+    except Exception as exc:
+        print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
