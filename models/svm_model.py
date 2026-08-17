@@ -21,8 +21,9 @@ generic helpers:
 
 Probability Calibration
 -----------------------
-SVC is initialised with ``probability=True`` so that ``predict_proba()``
-is available for:
+SVC is initialised with ``probability=False`` and then wrapped in
+``CalibratedClassifierCV(cv="prefit")`` after hyperparameter search, so
+that ``predict_proba()`` is available for:
   - AUC-ROC computation in evaluate_model() / generate_svm_report()
   - The Live Prediction probability meter (pages/3_Live_Prediction.py)
   - The Model Comparison page (pages/2_Model_Comparison.py)
@@ -59,22 +60,17 @@ import pandas as pd
 import seaborn as sns
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     PrecisionRecallDisplay,
     RocCurveDisplay,
-    accuracy_score,
     average_precision_score,
-    classification_report,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
 )
 from sklearn.model_selection import (
     GridSearchCV,
+    RandomizedSearchCV,
     StratifiedKFold,
     cross_validate,
     learning_curve,
@@ -82,10 +78,7 @@ from sklearn.model_selection import (
 from sklearn.svm import SVC
 
 from src.data_preprocessing import build_preprocessor, preprocess_data
-from src.utils import evaluate_model, print_metrics, save_model, generate_shap_explanation
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.svm import SVC
-from imblearn.pipeline import Pipeline
+from src.utils import evaluate_model, generate_shap_explanation, print_metrics, save_model
 
 sns.set_style("whitegrid")
 
@@ -121,11 +114,24 @@ def _save_show(fig: plt.Figure, name: str, save_dir: str | None, show: bool) -> 
 # ---------------------------------------------------------------------------
 
 
-# 2. Build base pipeline without internal Platt scaling
 def build_svm_pipeline(use_smote: bool = True, random_state: int = 42) -> Pipeline:
+    """Build a base SVM pipeline (preprocessor → optional SMOTE → SVC).
+
+    SVC is created without the deprecated ``probability`` parameter; Platt
+    scaling is applied externally via
+    ``CalibratedClassifierCV(estimator, ensemble=False)`` after tuning so
+    that calibration does not interfere with the hyperparameter search
+    (sklearn ≥ 1.9 API).
+    """
     preprocessor = build_preprocessor(scale_numerical=True)
-    # Set probability=False to eliminate 5x training overhead during search
-    svm = SVC(random_state=random_state, probability=False, max_iter=5000)
+    # max_iter=-1 lets the solver converge naturally based on tol
+    # probability= param is deprecated in sklearn 1.9; calibration is handled
+    # by CalibratedClassifierCV(ensemble=False) in train_svm() instead.
+    svm = SVC(
+        random_state=random_state,
+        max_iter=-1,
+        tol=1e-3,
+    )
 
     steps = [("preprocessor", preprocessor)]
     if use_smote:
@@ -148,38 +154,11 @@ def train_svm(
     verbose: int = 2,
     n_jobs: int = -1,
 ):
-    """Train an SVM classifier with hyperparameter tuning and save it.
-
-    Parameters
-    ----------
-    X_train, y_train : Raw (untransformed) training data/labels.
-    use_smote         : Oversample the minority (Purchase) class inside the
-                        pipeline so tuning/CV never leaks resampled rows
-                        into validation folds.
-    param_grid        : Override the default SVM hyperparameter search space.
-    scoring           : Metric optimised for. F1 is the default because
-                        Accuracy is misleading on an ~85/15 imbalanced target.
-    cv                : Number of stratified folds used during search.
-    search            : 'grid' for exhaustive GridSearchCV, 'random' for
-                        RandomizedSearchCV (useful once the grid gets big,
-                        e.g. when adding 'poly' kernel + degree).
-    output_path       : Where to joblib.dump() the best pipeline. Pass None
-                        to skip saving.
-
-    Returns
-    -------
-    (best_model, search_object)
-        best_model    : fitted best-performing Pipeline.
-        search_object : the fitted GridSearchCV/RandomizedSearchCV object,
-                        kept so cv_results_ can be plotted for the report.
-    """
     pipeline = build_svm_pipeline(use_smote=use_smote, random_state=random_state)
     grid = param_grid or DEFAULT_PARAM_GRID
     stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
 
     if search == "random":
-        from sklearn.model_selection import RandomizedSearchCV
-
         search_obj = RandomizedSearchCV(
             estimator=pipeline,
             param_distributions=grid,
@@ -201,15 +180,24 @@ def train_svm(
         )
 
     search_obj.fit(X_train, y_train)
-    best_model = search_obj.best_estimator_
+    raw_best_pipeline = search_obj.best_estimator_
 
     print(f"\n[train_svm] Best SVM params: {search_obj.best_params_}")
     print(f"[train_svm] Best CV {scoring} score: {search_obj.best_score_:.4f}")
 
-    if output_path:
-        save_model(best_model, output_path)
+    # Calibrate the winning pipeline to safely expose predict_proba().
+    # sklearn ≥ 1.9: cv="prefit" was removed; use ensemble=False instead
+    # to wrap a pre-fitted estimator without re-fitting.
+    calibrated_model = CalibratedClassifierCV(
+        estimator=raw_best_pipeline,
+        ensemble=False,
+    )
+    calibrated_model.fit(X_train, y_train)
 
-    return best_model, search_obj
+    if output_path:
+        save_model(calibrated_model, output_path)
+
+    return calibrated_model, search_obj
 
 
 # ---------------------------------------------------------------------------
@@ -286,8 +274,8 @@ def cross_validate_svm(model: Pipeline, X, y, cv: int = 5, random_state: int = 4
     pipeline so the report can state e.g. "F1 = 0.71 +/- 0.03 across 5
     folds" instead of a single point estimate.
 
-    AUC scoring requires ``predict_proba``; because the pipeline is built
-    with ``probability=True`` this is always available.
+    AUC scoring requires ``predict_proba``; because the pipeline is wrapped
+    in ``CalibratedClassifierCV`` this is always available.
     """
     stratified_cv = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     scoring = {
@@ -326,11 +314,14 @@ def get_svm_feature_importance(
 ) -> pd.DataFrame:
     """Return a DataFrame of feature importances for the fitted SVM pipeline.
 
+    The model is expected to be a ``CalibratedClassifierCV`` wrapping the raw
+    SVM pipeline produced by ``train_svm()``.  The inner pipeline is accessed
+    via ``model.estimator`` before inspecting individual named steps.
+
     - Linear kernel  -> uses |coefficient| from svm.coef_ directly (fast,
                         exact, directly interpretable).
     - Non-linear     -> falls back to permutation importance on the whole
-                        pipeline (works for any kernel, needs y_sample,
-                        slower).
+                        model (works for any kernel, needs y_sample, slower).
 
     Edge-case handling
     ------------------
@@ -339,10 +330,12 @@ def get_svm_feature_importance(
     is a numpy array.  This prevents an AttributeError when the test set has
     been pre-transformed to a numpy matrix.
     """
-    svm_step = model.named_steps["svm"]
+    # Unwrap CalibratedClassifierCV to reach the raw pipeline
+    inner_pipeline = getattr(model, "estimator", model)
+    svm_step = inner_pipeline.named_steps["svm"]
 
     if svm_step.kernel == "linear":
-        preprocessor = model.named_steps["preprocessor"]
+        preprocessor = inner_pipeline.named_steps["preprocessor"]
         feature_names = preprocessor.get_feature_names_out()
         coefs = np.abs(svm_step.coef_).ravel()
         importance_df = (
@@ -523,8 +516,8 @@ def generate_svm_report(
     Probability arrays
     ------------------
     ``evaluate_model()`` calls ``model.predict_proba()`` when available.
-    Because the pipeline is built with ``probability=True``, this is always
-    present for SVM pipelines from ``build_svm_pipeline()``.
+    Because the pipeline is wrapped in ``CalibratedClassifierCV``, this is
+    always present for SVM models produced by ``train_svm()``.
     """
     # --- Core metrics -------------------------------------------------------
     base_metrics = evaluate_model(model, X_test, y_test)
