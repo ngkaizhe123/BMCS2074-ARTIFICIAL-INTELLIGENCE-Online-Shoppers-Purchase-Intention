@@ -76,7 +76,9 @@ if not models:
 
 # ── Sidebar: model picker ───────────────────────────────────────────────
 st.sidebar.header("Prediction Mode")
-prediction_mode = st.sidebar.radio("Select mode", ["Single Model", "Compare All Models"])
+prediction_mode = st.sidebar.radio(
+    "Select mode", ["Single Model", "Compare All Models"]
+)
 
 st.sidebar.header("Models")
 if prediction_mode == "Single Model":
@@ -89,7 +91,9 @@ if prediction_mode == "Single Model":
         unsafe_allow_html=True,
     )
     if not hasattr(selected_model, "predict_proba"):
-        st.sidebar.caption("ℹ️ This model only returns a hard class label, no probability.")
+        st.sidebar.caption(
+            "ℹ️ This model only returns a hard class label, no probability."
+        )
 else:
     st.sidebar.info(f"🔮 Will predict using all {len(models)} models.")
 
@@ -450,14 +454,14 @@ if submitted:
                 truth = st.session_state["_last_random_truth"]
                 truth_label = "Purchase" if truth == 1 else "No Purchase"
                 st.info(f"📌 Actual recorded outcome: **{truth_label}**")
-                
+
             cols = st.columns(len(models))
             for col, (name, info) in zip(cols, models.items()):
                 with col:
                     model = info["model"]
                     icon = model_icon(info["stem"])
                     st.markdown(f"**{icon} {name}**")
-                    
+
                     try:
                         pred = model.predict(input_data)[0]
                         prob = (
@@ -466,18 +470,18 @@ if submitted:
                             else None
                         )
                         pur_prob = float(prob[1]) if prob is not None else float(pred)
-                        
+
                         if pred == 1:
                             st.success("🛒 Purchase")
                         else:
                             st.error("❌ No Purchase")
-                            
+
                         if prob is not None:
                             st.caption(f"Purchase Probability: {pur_prob*100:.1f}%")
                             probability_meter(pur_prob)
                         else:
                             st.caption("No probability available")
-                            
+
                     except Exception as e:
                         st.error(f"Error: {e}")
 
