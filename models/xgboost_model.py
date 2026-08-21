@@ -380,19 +380,13 @@ def pso_search_xgb(
         print("=" * 70)
 
         print(f"Particles        : {n_particles}")
-
         print(f"Iterations       : {n_iterations}")
-
         print(f"CV folds         : {n_splits}")
-
         print(f"Optimization     : PR-AUC")
-
         print(f"SMOTE            : {use_smote}")
-
         print(f"Initial Best PR-AUC: {gbest_score:.4f}")
 
         print(f"Initial Best Params:")
-
         for name, value in _decode(gbest_position).items():
             print(f"    {name}: {value}")
 
@@ -494,11 +488,8 @@ def pso_search_xgb(
         # --------------------------------------------------------------------
 
         if verbose:
-
             print(f"\n[PSO] Iteration " f"{iteration + 1}/{n_iterations}")
-
             print(f"      Best CV PR-AUC: " f"{gbest_score:.4f}")
-
             print(f"      Best Params: " f"{_decode(gbest_position)}")
 
     # ------------------------------------------------------------------------
@@ -512,14 +503,10 @@ def pso_search_xgb(
         print("\n" + "=" * 70)
         print(" PSO Optimization Completed")
         print("=" * 70)
-
         print(f"Best CV PR-AUC: " f"{gbest_score:.4f}")
-
         print("\nBest Parameters:")
-
         for name, value in best_params.items():
             print(f"    {name}: {value}")
-
         print("=" * 70)
 
     return PSOResult(
@@ -674,21 +661,13 @@ def evaluate_final_model(
     print("=" * 70)
 
     print(f"Accuracy : {accuracy:.4f}")
-
     print(f"Precision: {precision:.4f}")
-
     print(f"Recall   : {recall:.4f}")
-
     print(f"F1 Score : {f1:.4f}")
-
     print(f"ROC-AUC  : {roc_auc:.4f}")
-
     print(f"PR-AUC   : {pr_auc:.4f}")
-
     print("\nConfusion Matrix:")
-
     print(cm)
-
     print("=" * 70)
 
     return {
@@ -955,13 +934,11 @@ def train_xgboost(
         best_model = random_search.best_estimator_
 
         print("\nBest Parameters:")
-
         print(random_search.best_params_)
 
         print(f"Best CV F1: " f"{random_search.best_score_:.4f}")
 
         if output_path:
-
             save_model(
                 best_model,
                 output_path,

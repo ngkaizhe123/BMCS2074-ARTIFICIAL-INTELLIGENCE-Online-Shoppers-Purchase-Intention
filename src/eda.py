@@ -137,13 +137,19 @@ def plot_target_distribution(
     ratio = counts[0] / counts[1]
 
     sns.set_style(SNS_STYLE)
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # Only create 2 subplots because we have 2 charts
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
     fig.suptitle("Target Variable – Revenue", fontsize=14, fontweight="bold")
 
-    # Bar
+    # ---------------------------------------------------------
+    # 1. Bar chart
+    # ---------------------------------------------------------
     bars = axes[0].bar(labels, counts.values, color=PALETTE_BINARY, edgecolor="w")
+
     axes[0].set_title("Count")
     axes[0].set_ylabel("Sessions")
+
     for b, c, p in zip(bars, counts.values, pcts.values):
         axes[0].text(
             b.get_x() + b.get_width() / 2,
@@ -153,7 +159,9 @@ def plot_target_distribution(
             fontsize=10,
         )
 
-    # Pie
+    # ---------------------------------------------------------
+    # 2. Pie chart
+    # ---------------------------------------------------------
     axes[1].pie(
         counts.values,
         labels=labels,
@@ -162,6 +170,7 @@ def plot_target_distribution(
         startangle=90,
         wedgeprops={"edgecolor": "w"},
     )
+
     axes[1].set_title("Proportion")
 
     plt.tight_layout()

@@ -75,17 +75,27 @@ if not models:
     st.stop()
 
 # ── Sidebar: model picker ───────────────────────────────────────────────
-st.sidebar.header("Models")
-model_name = st.sidebar.selectbox("Choose a trained model", list(models.keys()))
-selected_info = models[model_name]
-selected_model = selected_info["model"]
-icon = model_icon(selected_info["stem"])
-st.sidebar.markdown(
-    f'<span class="model-badge">{icon} Active: {model_name}</span>',
-    unsafe_allow_html=True,
+st.sidebar.header("Prediction Mode")
+prediction_mode = st.sidebar.radio(
+    "Select mode", ["Single Model", "Compare All Models"]
 )
-if not hasattr(selected_model, "predict_proba"):
-    st.sidebar.caption("ℹ️ This model only returns a hard class label, no probability.")
+
+st.sidebar.header("Models")
+if prediction_mode == "Single Model":
+    model_name = st.sidebar.selectbox("Choose a trained model", list(models.keys()))
+    selected_info = models[model_name]
+    selected_model = selected_info["model"]
+    icon = model_icon(selected_info["stem"])
+    st.sidebar.markdown(
+        f'<span class="model-badge">{icon} Active: {model_name}</span>',
+        unsafe_allow_html=True,
+    )
+    if not hasattr(selected_model, "predict_proba"):
+        st.sidebar.caption(
+            "ℹ️ This model only returns a hard class label, no probability."
+        )
+else:
+    st.sidebar.info(f"🔮 Will predict using all {len(models)} models.")
 
 # ── Static option lists ─────────────────────────────────────────────────
 MONTHS = [
@@ -402,40 +412,78 @@ if submitted:
     )
 
     try:
-        prediction = selected_model.predict(input_data)[0]
-        proba = (
-            selected_model.predict_proba(input_data)[0]
-            if hasattr(selected_model, "predict_proba")
-            else None
-        )
-
-        st.markdown("---")
-        purchase_proba = float(proba[1]) if proba is not None else float(prediction)
-        confidence_pct = (
-            purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
-        )
-        verdict_banner(bool(prediction == 1), confidence_pct)
-
-        if proba is not None:
-            probability_meter(purchase_proba)
-            m1, m2, m3 = st.columns(3)
-            m1.metric("No Purchase probability", f"{proba[0] * 100:.1f}%")
-            m2.metric("Purchase probability", f"{proba[1] * 100:.1f}%")
-            m3.metric("Confidence", confidence_label(purchase_proba))
-        else:
-            st.info(
-                "This model only exposes a hard class prediction, not a probability estimate."
+        if prediction_mode == "Single Model":
+            prediction = selected_model.predict(input_data)[0]
+            proba = (
+                selected_model.predict_proba(input_data)[0]
+                if hasattr(selected_model, "predict_proba")
+                else None
             )
 
-        if "_last_random_truth" in st.session_state:
-            truth = st.session_state["_last_random_truth"]
-            truth_label = "Purchase" if truth == 1 else "No Purchase"
-            if truth == prediction:
-                st.success(f"✅ Matches the real recorded outcome ({truth_label}).")
+            st.markdown("---")
+            purchase_proba = float(proba[1]) if proba is not None else float(prediction)
+            confidence_pct = (
+                purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
+            )
+            verdict_banner(bool(prediction == 1), confidence_pct)
+
+            if proba is not None:
+                probability_meter(purchase_proba)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("No Purchase probability", f"{proba[0] * 100:.1f}%")
+                m2.metric("Purchase probability", f"{proba[1] * 100:.1f}%")
+                m3.metric("Confidence", confidence_label(purchase_proba))
             else:
-                st.error(
-                    f"❌ Model disagreed with the real recorded outcome ({truth_label})."
+                st.info(
+                    "This model only exposes a hard class prediction, not a probability estimate."
                 )
+
+            if "_last_random_truth" in st.session_state:
+                truth = st.session_state["_last_random_truth"]
+                truth_label = "Purchase" if truth == 1 else "No Purchase"
+                if truth == prediction:
+                    st.success(f"✅ Matches the real recorded outcome ({truth_label}).")
+                else:
+                    st.error(
+                        f"❌ Model disagreed with the real recorded outcome ({truth_label})."
+                    )
+        else:
+            st.markdown("---")
+            st.subheader("🤖 Multiple Model Predictions")
+            if "_last_random_truth" in st.session_state:
+                truth = st.session_state["_last_random_truth"]
+                truth_label = "Purchase" if truth == 1 else "No Purchase"
+                st.info(f"📌 Actual recorded outcome: **{truth_label}**")
+
+            cols = st.columns(len(models))
+            for col, (name, info) in zip(cols, models.items()):
+                with col:
+                    model = info["model"]
+                    icon = model_icon(info["stem"])
+                    st.markdown(f"**{icon} {name}**")
+
+                    try:
+                        pred = model.predict(input_data)[0]
+                        prob = (
+                            model.predict_proba(input_data)[0]
+                            if hasattr(model, "predict_proba")
+                            else None
+                        )
+                        pur_prob = float(prob[1]) if prob is not None else float(pred)
+
+                        if pred == 1:
+                            st.success("🛒 Purchase")
+                        else:
+                            st.error("❌ No Purchase")
+
+                        if prob is not None:
+                            st.caption(f"Purchase Probability: {pur_prob*100:.1f}%")
+                            probability_meter(pur_prob)
+                        else:
+                            st.caption("No probability available")
+
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
         with st.expander("📋 Input summary", expanded=False):
             st.dataframe(input_data, width="stretch")
