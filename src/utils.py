@@ -142,12 +142,20 @@ def plot_roc_curve(model, X_test, y_test):
     return plt.gcf()
 
 
-def save_model(model, output_path: str | Path) -> None:
-    """Save trained model/pipeline to file, creating parent directories if needed."""
+def save_model(model, output_path: str | Path, compress: int = 3) -> None:
+    """Save trained model/pipeline to file, creating parent directories if needed.
+
+    Args:
+        model: The trained model or pipeline to save.
+        output_path: Destination file path for the .pkl file.
+        compress: joblib compression level 0-9 (0 = none, 3 = good balance of
+            size vs speed, 9 = maximum compression). Defaults to 3, which
+            typically reduces file size by 3-5x with negligible load overhead.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, path)
-    print(f"[save_model] Model saved successfully to {path.resolve()}")
+    joblib.dump(model, path, compress=compress)
+    print(f"[save_model] Model saved successfully to {path.resolve()} (compress={compress})")
 
 
 def load_model(filepath: str | Path):
