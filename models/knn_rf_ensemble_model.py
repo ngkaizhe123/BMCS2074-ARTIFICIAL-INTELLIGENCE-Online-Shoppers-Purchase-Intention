@@ -111,7 +111,7 @@ def train_knn_rf_ensemble(
         }
     if rf_param_grid is None:
         rf_param_grid = {
-            "rf__n_estimators": [200, 300],
+            "rf__n_estimators": [100, 150],
             "rf__max_depth": [8, 12, None],
         }
     if weight_candidates is None:
