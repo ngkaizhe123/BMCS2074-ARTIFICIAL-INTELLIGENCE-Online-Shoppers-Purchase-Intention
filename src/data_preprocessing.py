@@ -26,10 +26,11 @@ Saving cleaned data (run as script)
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE, SMOTENC
-from pathlib import Path
 from scipy import stats
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
@@ -61,7 +62,12 @@ NUMERICAL_FEATURES = [
     "TrafficType",
 ]
 
-# Columns that are genuinely continuous and safe to run outlier-detection on.
+# Numerical features selected for outlier detection based on EDA.
+# These include count/duration/rate variables with meaningful skewness
+# and long-tailed distributions. Zero-inflated features are excluded
+# because conventional IQR filtering can incorrectly remove valid
+# non-zero observations.
+
 # Deliberately EXCLUDES:
 #   - OperatingSystems / Browser / Region / TrafficType: these are categorical
 #     ID codes stored as integers, not continuous measurements. IQR/Z-score

@@ -107,20 +107,20 @@ def compute_stats(df: pd.DataFrame):
     }
 
 
-def show_plot(filename: str, title: str, caption: str = "", expanded: bool = False):
+def show_plot(filename: str, title: str, caption: str = ""):
     """Load a plot saved by src/eda.py's run_eda(), with a friendly
     fallback if it hasn't been generated yet."""
     path = PLOT_DIR / filename
-    with st.expander(f"🖼️ {title}", expanded=expanded):
-        if path.exists():
-            st.image(str(path), width="stretch")
-            if caption:
-                st.caption(caption)
-        else:
-            st.info(
-                f"Plot not found. Run `python -m src.eda` (or `run_eda()`) "
-                f"to generate `{filename}`."
-            )
+    st.subheader(f"🖼️ {title}")
+    if path.exists():
+        st.image(str(path), width="stretch")
+        if caption:
+            st.caption(caption)
+    else:
+        st.info(
+            f"Plot not found. Run `python -m src.eda` (or `run_eda()`) "
+            f"to generate `{filename}`."
+        )
 
 
 def chip(label: str):
@@ -182,7 +182,7 @@ m1.metric(labels[0], f"{counts[0]:,}", f"{counts[0] / counts.sum() * 100:.1f}%")
 m2.metric(labels[1], f"{counts[1]:,}", f"{counts[1] / counts.sum() * 100:.1f}%")
 m3.metric("Imbalance Ratio", f"{ratio:.2f} : 1")
 
-st.bar_chart(counts.rename(index=labels))
+show_plot("01_target_distribution.png", "Target Distribution")
 st.info(
     "ℹ️ **What this means for preprocessing:** `train_test_split(..., stratify=y)` "
     "preserves this ~5.5:1 ratio across train/test, and `get_smote()` oversamples "
@@ -243,23 +243,12 @@ st.header("5. Categorical & Ordinal Feature Distributions")
 chip("ENCODING STRATEGY")
 
 st.markdown(
-    "**Nominal categories** (`Month`, `VisitorType`, `Weekend`) — one-hot encoded:"
-)
-for col_name in CATEGORICAL_FEATURES:
-    with st.expander(f"📂 {col_name}"):
-        vc = df[col_name].value_counts()
-        st.bar_chart(vc)
-
-st.markdown(
+    "**Nominal categories** (`Month`, `VisitorType`, `Weekend`) — one-hot encoded.\n\n"
     "**Integer-coded IDs** (`OperatingSystems`, `Browser`, `Region`, `TrafficType`) "
     "— treated as numerical (passthrough for XGBoost, scaled for KNN/SVM), *not* "
     "one-hot encoded, since they're high-cardinality IDs rather than a handful of "
-    "nominal labels:"
+    "nominal labels."
 )
-for col_name in ORDINAL_FEATURES:
-    with st.expander(f"📂 {col_name}"):
-        vc = df[col_name].value_counts().sort_index()
-        st.bar_chart(vc)
 
 show_plot(
     "04_categorical_distributions.png",
@@ -274,7 +263,7 @@ st.markdown("---")
 st.header("6. Correlation Heatmap")
 chip("WHAT DRIVES REVENUE")
 
-show_plot("05_correlation_heatmap.png", "Correlation Heatmap", expanded=False)
+show_plot("05_correlation_heatmap.png", "Correlation Heatmap")
 
 st.subheader("Top correlations with Revenue")
 top_corr_df = stats_["top_corr"].head(5).reset_index()
