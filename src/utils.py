@@ -155,7 +155,9 @@ def save_model(model, output_path: str | Path, compress: int = 3) -> None:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, path, compress=compress)
-    print(f"[save_model] Model saved successfully to {path.resolve()} (compress={compress})")
+    print(
+        f"[save_model] Model saved successfully to {path.resolve()} (compress={compress})"
+    )
 
 
 def load_model(filepath: str | Path):
