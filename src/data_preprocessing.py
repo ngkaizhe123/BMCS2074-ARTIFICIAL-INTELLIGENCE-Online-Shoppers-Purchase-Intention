@@ -6,16 +6,21 @@ Online Shoppers Intention dataset.
 
 Pipeline overview
 -----------------
- 1. load_data               – Read raw CSV
- 2. remove_duplicates       – Drop 125 exact-duplicate rows (found via EDA)
- 3. handle_missing_values   – Median/mode imputation (safeguard; raw data has none)
- 4. remove_outliers_iqr     – IQR method (for KNN / SVM that are distance-sensitive)
- 5. remove_outliers_zscore  – Z-score method (alternative to IQR)
- 6. encode_target           – Boolean Revenue → int (0 / 1)
- 7. run_preprocessing_pipeline – Steps 2-6 assembled; also called by preprocess_data()
- 8. build_preprocessor      – sklearn ColumnTransformer (OHE + optional StandardScaler)
- 9. get_smote               – SMOTE instance for training pipelines
-10. preprocess_data         – Full pipeline: clean → split → (optional transform)
+ 1. load_data                    – Read raw CSV
+ 2. remove_duplicates            – Drop 125 exact-duplicate rows (found via EDA)
+ 3. handle_missing_values        – Median/mode imputation (safeguard; raw data has none)
+ 4. remove_outliers_iqr          – IQR method (for KNN / SVM that are distance-sensitive)
+ 5. remove_outliers_zscore       – Z-score method (alternative to IQR)
+ 6. encode_target                – Boolean Revenue → int (0 / 1)
+ 7. validate_business_rules      – Domain-level data integrity checks
+ 8. fix_duration_consistency     – Fix page-count ↔ duration mismatches
+ 9. cap_duration_outliers        – Cap extreme durations to business-meaningful limits
+10. clip_rates                   – Enforce BounceRates / ExitRates within [0, 1]
+11. validate_categorical_values  – Ensure categorical columns have valid values
+12. run_preprocessing_pipeline   – Steps 2-11 assembled; also called by preprocess_data()
+13. build_preprocessor           – sklearn ColumnTransformer (OHE + optional StandardScaler)
+14. get_smote                    – SMOTE instance for training pipelines
+15. preprocess_data              – Full pipeline: clean → split → (optional transform)
 
 Saving cleaned data (run as script)
 ------------------------------------
@@ -88,6 +93,29 @@ CONTINUOUS_FEATURES_FOR_OUTLIERS = [
 ]
 
 TARGET = "Revenue"
+
+# Page-count ↔ duration column pairs used by business-rule validation.
+# Each tuple maps (page_count_column, duration_column).
+PAGE_DURATION_PAIRS = [
+    ("Administrative", "Administrative_Duration"),
+    ("Informational", "Informational_Duration"),
+    ("ProductRelated", "ProductRelated_Duration"),
+]
+
+# Business-meaningful upper limits for session durations (in seconds).
+# Sessions exceeding these caps likely represent idle tabs, bots, or
+# tracking errors rather than genuine user engagement.
+DURATION_CAPS = {
+    "Administrative_Duration": 3600,  # 1 hour
+    "Informational_Duration": 3600,  # 1 hour
+    "ProductRelated_Duration": 36000,  # 10 hours
+}
+
+# Valid values for categorical columns in the Online Shoppers dataset.
+# NOTE: Jan and Apr are absent from the raw dataset.
+VALID_MONTHS = {"Feb", "Mar", "May", "June", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+VALID_VISITOR_TYPES = {"Returning_Visitor", "New_Visitor", "Other"}
+VALID_SPECIAL_DAY = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +334,309 @@ def encode_target(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Step 6 – Unified Cleaning Pipeline (used for CSV export & preprocess_data)
+# Step 6 – Business Rule Validation (flag logical data-quality issues)
+# ---------------------------------------------------------------------------
+
+
+def validate_business_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Check domain-level data integrity and report violations.
+
+    Business rules validated
+    -------------------------
+    1. Duration without pages: if pages_viewed == 0, duration should be 0.
+       A non-zero duration with zero page views indicates a tracking error
+       (the user never visited that section, so no time should be recorded).
+    2. Pages without duration: if pages_viewed > 0, duration should be > 0.
+       Visiting pages with exactly 0 seconds recorded is suspicious and may
+       indicate bot traffic or incomplete tracking.
+    3. BounceRates <= ExitRates: by Google Analytics definition, bounce rate
+       is a special case of exit rate (single-page sessions). A session
+       cannot have BounceRate > ExitRate.
+    4. Non-negative PageValues: PageValues represents the average monetary
+       value of pages visited before a transaction — negative values are
+       not meaningful.
+    5. Valid SpecialDay values: the dataset encodes proximity to a special
+       day using fixed intervals {0.0, 0.2, 0.4, 0.6, 0.8, 1.0}. Values
+       outside this set suggest data corruption.
+
+    This function REPORTS violations via print statements but does NOT
+    drop rows or modify data — the downstream fix functions handle that.
+    """
+    n = len(df)
+    print(f"\n[validate_business_rules] Checking {n:,} rows...")
+    total_violations = 0
+
+    # Rule 1 & 2: Page-count ↔ duration consistency
+    for pages_col, dur_col in PAGE_DURATION_PAIRS:
+        if pages_col not in df.columns or dur_col not in df.columns:
+            continue
+        dur_without_pages = ((df[pages_col] == 0) & (df[dur_col] > 0)).sum()
+        pages_without_dur = ((df[pages_col] > 0) & (df[dur_col] == 0)).sum()
+        if dur_without_pages > 0:
+            print(
+                f"    [WARN] {dur_without_pages} rows have {pages_col}==0 "
+                f"but {dur_col}>0 (duration without page visits)"
+            )
+            total_violations += dur_without_pages
+        if pages_without_dur > 0:
+            print(
+                f"    [WARN] {pages_without_dur} rows have {pages_col}>0 "
+                f"but {dur_col}==0 (page visits without duration)"
+            )
+            total_violations += pages_without_dur
+
+    # Rule 3: BounceRates <= ExitRates
+    if "BounceRates" in df.columns and "ExitRates" in df.columns:
+        bounce_gt_exit = (df["BounceRates"] > df["ExitRates"]).sum()
+        if bounce_gt_exit > 0:
+            print(
+                f"    [WARN] {bounce_gt_exit} rows have BounceRates > ExitRates "
+                "(violates GA definition)"
+            )
+            total_violations += bounce_gt_exit
+
+    # Rule 4: Non-negative PageValues
+    if "PageValues" in df.columns:
+        neg_pv = (df["PageValues"] < 0).sum()
+        if neg_pv > 0:
+            print(f"    [WARN] {neg_pv} rows have negative PageValues")
+            total_violations += neg_pv
+
+    # Rule 5: Valid SpecialDay values
+    if "SpecialDay" in df.columns:
+        invalid_sd = (~df["SpecialDay"].isin(VALID_SPECIAL_DAY)).sum()
+        if invalid_sd > 0:
+            print(
+                f"    [WARN] {invalid_sd} rows have SpecialDay values "
+                f"outside {sorted(VALID_SPECIAL_DAY)}"
+            )
+            total_violations += invalid_sd
+
+    if total_violations == 0:
+        print("    [OK] All business rules passed — no violations found.")
+    else:
+        print(f"    [TOTAL] {total_violations} violations detected across all rules.")
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 7 – Fix Duration Consistency
+# ---------------------------------------------------------------------------
+
+
+def fix_duration_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fix cross-feature inconsistencies between page-count and duration columns.
+
+    Business logic
+    ---------------
+    - If pages_viewed == 0 but duration > 0:
+        → Set duration to 0 (can't spend time on pages never visited).
+    - If pages_viewed > 0 but duration == 0:
+        → Replace duration with the median of non-zero durations for that
+          feature (a visit must take *some* time; 0 is a tracking gap).
+
+    These inconsistencies are likely caused by incomplete tracking or
+    session-timeout quirks in Google Analytics. Leaving them unfixed
+    introduces noise: e.g. a session with 10 product pages but 0 seconds
+    would mislead the model into thinking heavy browsing = instant action.
+    """
+    df = df.copy()
+    total_fixed = 0
+
+    for pages_col, dur_col in PAGE_DURATION_PAIRS:
+        if pages_col not in df.columns or dur_col not in df.columns:
+            continue
+
+        # Case 1: duration > 0 but no pages visited → zero out duration
+        mask_dur_no_pages = (df[pages_col] == 0) & (df[dur_col] > 0)
+        n_fix1 = mask_dur_no_pages.sum()
+        if n_fix1 > 0:
+            df.loc[mask_dur_no_pages, dur_col] = 0
+            print(
+                f"    [{dur_col}] Set {n_fix1} rows to 0 "
+                f"(had duration > 0 but {pages_col} == 0)"
+            )
+            total_fixed += n_fix1
+
+        # Case 2: pages > 0 but duration == 0 → fill with median of non-zero
+        mask_pages_no_dur = (df[pages_col] > 0) & (df[dur_col] == 0)
+        n_fix2 = mask_pages_no_dur.sum()
+        if n_fix2 > 0:
+            nonzero_median = df.loc[df[dur_col] > 0, dur_col].median()
+            df.loc[mask_pages_no_dur, dur_col] = nonzero_median
+            print(
+                f"    [{dur_col}] Filled {n_fix2} rows with median {nonzero_median:.1f} "
+                f"(had {pages_col} > 0 but duration == 0)"
+            )
+            total_fixed += n_fix2
+
+    print(f"[fix_duration_consistency] Total rows fixed: {total_fixed}")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 8 – Cap Duration Outliers (business-meaningful upper limits)
+# ---------------------------------------------------------------------------
+
+
+def cap_duration_outliers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cap extreme session durations at business-meaningful upper limits.
+
+    Business logic
+    ---------------
+    Unlike statistical outlier removal (IQR / Z-score) which drops entire
+    rows, capping *preserves* the session while limiting the impact of
+    extreme values that almost certainly represent idle tabs, bots, or
+    tracking errors rather than genuine browsing.
+
+    Caps applied (see DURATION_CAPS constant):
+        - Administrative_Duration  → 3 600 s  (1 hour)
+        - Informational_Duration   → 3 600 s  (1 hour)
+        - ProductRelated_Duration  → 36 000 s (10 hours)
+
+    These thresholds are deliberately generous so that only truly
+    unreasonable values are affected. For example, a 10-hour product
+    browsing session is already extreme but plausible for comparison
+    shopping; beyond that is almost certainly an abandoned tab.
+
+    This step is especially valuable for distance-based models (KNN, SVM)
+    where a single extreme value can distort the entire distance space.
+    """
+    df = df.copy()
+    total_capped = 0
+
+    for col, cap in DURATION_CAPS.items():
+        if col not in df.columns:
+            continue
+        n_over = (df[col] > cap).sum()
+        if n_over > 0:
+            df[col] = df[col].clip(upper=cap)
+            print(
+                f"    [{col}] Capped {n_over} rows at {cap:,} seconds "
+                f"({cap / 3600:.0f} hr)"
+            )
+            total_capped += n_over
+
+    print(f"[cap_duration_outliers] Total values capped: {total_capped}")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 9 – Clip Rates (enforce [0, 1] bounds and BounceRates ≤ ExitRates)
+# ---------------------------------------------------------------------------
+
+
+def clip_rates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enforce valid boundaries on BounceRates and ExitRates.
+
+    Business logic
+    ---------------
+    1. Both rates must lie in [0, 1] — they represent proportions.
+    2. BounceRates ≤ ExitRates — by Google Analytics definition, a "bounce"
+       is a single-page session exit. Every bounce is an exit, so the bounce
+       rate for a page can never exceed its exit rate.
+
+    When BounceRates > ExitRates, this function sets BounceRates = ExitRates
+    (choosing the more reliable metric as the anchor, since ExitRates is
+    computed from a larger sample of pageviews).
+    """
+    df = df.copy()
+    n_clipped = 0
+
+    for rate_col in ["BounceRates", "ExitRates"]:
+        if rate_col not in df.columns:
+            continue
+        out_of_range = ((df[rate_col] < 0) | (df[rate_col] > 1)).sum()
+        if out_of_range > 0:
+            df[rate_col] = df[rate_col].clip(0, 1)
+            print(f"    [{rate_col}] Clipped {out_of_range} values to [0, 1]")
+            n_clipped += out_of_range
+
+    # Fix BounceRates > ExitRates
+    if "BounceRates" in df.columns and "ExitRates" in df.columns:
+        invalid_mask = df["BounceRates"] > df["ExitRates"]
+        n_invalid = invalid_mask.sum()
+        if n_invalid > 0:
+            df.loc[invalid_mask, "BounceRates"] = df.loc[invalid_mask, "ExitRates"]
+            print(
+                f"    [BounceRates] Corrected {n_invalid} rows where "
+                "BounceRates > ExitRates (set BounceRates = ExitRates)"
+            )
+            n_clipped += n_invalid
+
+    print(f"[clip_rates] Total corrections: {n_clipped}")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 10 – Validate Categorical Values
+# ---------------------------------------------------------------------------
+
+
+def validate_categorical_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure categorical columns contain only valid values.
+
+    Business logic
+    ---------------
+    - Month: the raw dataset contains 10 months (Jan and Apr are absent).
+      Any value outside the known set is replaced with the column mode.
+    - VisitorType: must be one of Returning_Visitor, New_Visitor, Other.
+    - Weekend: must be boolean (True/False).
+
+    Invalid categories can arise from manual data entry (e.g. the Live
+    Prediction form), data merges, or encoding errors. Replacing with
+    mode is safe because these columns have dominant categories
+    (e.g. ~85% Returning_Visitor) and a single misfire won't bias the model.
+    """
+    df = df.copy()
+    total_fixed = 0
+
+    validations = {
+        "Month": VALID_MONTHS,
+        "VisitorType": VALID_VISITOR_TYPES,
+    }
+
+    for col, valid_set in validations.items():
+        if col not in df.columns:
+            continue
+        invalid_mask = ~df[col].isin(valid_set)
+        n_invalid = invalid_mask.sum()
+        if n_invalid > 0:
+            mode_val = df.loc[~invalid_mask, col].mode()[0]
+            invalid_values = df.loc[invalid_mask, col].unique().tolist()
+            df.loc[invalid_mask, col] = mode_val
+            print(
+                f"    [{col}] Replaced {n_invalid} invalid values "
+                f"{invalid_values} with mode '{mode_val}'"
+            )
+            total_fixed += n_invalid
+
+    # Weekend: coerce to boolean
+    if "Weekend" in df.columns:
+        try:
+            df["Weekend"] = df["Weekend"].astype(bool)
+        except (ValueError, TypeError):
+            n_bad = df["Weekend"].apply(lambda x: x not in (True, False, 0, 1)).sum()
+            if n_bad > 0:
+                print(f"    [Weekend] {n_bad} non-boolean values coerced")
+                total_fixed += n_bad
+
+    if total_fixed == 0:
+        print("[validate_categorical_values] All categories valid.")
+    else:
+        print(f"[validate_categorical_values] Total corrections: {total_fixed}")
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 11 – Unified Cleaning Pipeline (used for CSV export & preprocess_data)
 # ---------------------------------------------------------------------------
 
 
@@ -324,16 +654,30 @@ def run_preprocessing_pipeline(
 
     Steps
     -----
-    1. remove_duplicates       – Drop 125 duplicate rows found in EDA
-    2. handle_missing_values   – Median/mode imputation (safeguard)
-    3. remove_outliers_*       – Optional IQR or Z-score outlier removal
-    4. encode_target           – Revenue bool → int
+    1. remove_duplicates            – Drop 125 duplicate rows found in EDA
+    2. handle_missing_values        – Median/mode imputation (safeguard)
+    3. validate_business_rules      – Flag domain-level data-quality issues
+    4. fix_duration_consistency     – Fix page-count ↔ duration mismatches
+    5. cap_duration_outliers        – Cap extreme durations to business limits
+    6. clip_rates                   – Enforce BounceRates/ExitRates in [0,1]
+    7. validate_categorical_values  – Replace invalid category values
+    8. remove_outliers_*            – Optional IQR or Z-score outlier removal
+    9. encode_target                – Revenue bool → int
     """
     print(f"\n[run_preprocessing_pipeline] Starting. Input shape: {df.shape}")
 
+    # --- Technical cleaning ---
     df = remove_duplicates(df)
     df = handle_missing_values(df)
 
+    # --- Business rule validation & fixes ---
+    df = validate_business_rules(df)
+    df = fix_duration_consistency(df)
+    df = cap_duration_outliers(df)
+    df = clip_rates(df)
+    df = validate_categorical_values(df)
+
+    # --- Statistical outlier removal (optional) ---
     if outlier_method == "iqr":
         df = remove_outliers_iqr(df)
     elif outlier_method == "zscore":
