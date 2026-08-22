@@ -106,9 +106,9 @@ PAGE_DURATION_PAIRS = [
 # Sessions exceeding these caps likely represent idle tabs, bots, or
 # tracking errors rather than genuine user engagement.
 DURATION_CAPS = {
-    "Administrative_Duration": 3600,      # 1 hour
-    "Informational_Duration": 3600,       # 1 hour
-    "ProductRelated_Duration": 36000,     # 10 hours
+    "Administrative_Duration": 3600,  # 1 hour
+    "Informational_Duration": 3600,  # 1 hour
+    "ProductRelated_Duration": 36000,  # 10 hours
 }
 
 # Valid values for categorical columns in the Online Shoppers dataset.

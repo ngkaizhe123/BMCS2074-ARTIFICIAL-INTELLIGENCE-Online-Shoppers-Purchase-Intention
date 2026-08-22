@@ -217,18 +217,22 @@ def train_knn_rf_ensemble(
         voting="soft",
         weights=[1, best_weight],
     )
-    # We do NOT need to fit the ensemble manually here, because cv=5 below will 
+    # We do NOT need to fit the ensemble manually here, because cv=5 below will
     # handle fitting it rigorously across folds!
 
     # ---- Step 4.5: Mathematical Probability Calibration -------------------
-    # To satisfy advanced mathematical evaluation criteria, we apply Platt 
-    # Scaling (Sigmoid Calibration) here. 
-    # Decision Trees (RF) and KNN output probabilities based on leaf purity 
-    # and vote counts, which can literally be 1.0 or 0.0. 
-    # CalibratedClassifierCV fits a logistic regression model on top of the 
+    # To satisfy advanced mathematical evaluation criteria, we apply Platt
+    # Scaling (Sigmoid Calibration) here.
+    # Decision Trees (RF) and KNN output probabilities based on leaf purity
+    # and vote counts, which can literally be 1.0 or 0.0.
+    # CalibratedClassifierCV fits a logistic regression model on top of the
     # ensemble's outputs to convert them into true, continuous Bayesian probabilities.
-    print("[train_knn_rf_ensemble] Applying Platt Scaling (Sigmoid Calibration) with 5-fold CV to smooth probabilities...")
-    calibrated_ensemble = CalibratedClassifierCV(estimator=ensemble, method="sigmoid", cv=5)
+    print(
+        "[train_knn_rf_ensemble] Applying Platt Scaling (Sigmoid Calibration) with 5-fold CV to smooth probabilities..."
+    )
+    calibrated_ensemble = CalibratedClassifierCV(
+        estimator=ensemble, method="sigmoid", cv=5
+    )
     calibrated_ensemble.fit(X_train, y_train)
 
     # ---- Step 5: Save the finished model so it can be reused later --------
