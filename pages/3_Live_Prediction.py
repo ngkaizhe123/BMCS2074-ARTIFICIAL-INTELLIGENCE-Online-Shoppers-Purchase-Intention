@@ -8,12 +8,15 @@ if str(project_root) not in sys.path:
 import joblib
 import pandas as pd
 import streamlit as st
+import time
 
 from src.data_preprocessing import preprocess_data
 from src.ui_theme import (
     apply_theme,
     confidence_label,
     model_icon,
+    navigation_breadcrumb,
+    page_loading_animation,
     probability_meter,
     verdict_banner,
 )
@@ -21,6 +24,19 @@ from src.ui_theme import (
 # ── Page config ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="Live Prediction", page_icon="🔮", layout="wide")
 apply_theme()
+
+# ── Page loading animation (only on first load) ─────────────────────────
+if "lp_loaded" not in st.session_state:
+    page_loading_animation(
+        "🔮",
+        "Live Prediction",
+        "Loading trained models for inference...",
+        duration=1.2,
+    )
+    st.session_state["lp_loaded"] = True
+
+# ── Navigation breadcrumb ────────────────────────────────────────────────
+navigation_breadcrumb("Live Prediction")
 
 st.title("🔮 Live Prediction")
 st.caption(
@@ -371,6 +387,10 @@ with st.form("prediction_form"):
 
 # ── Prediction (runs once, only on submit) ──────────────────────────────
 if submitted:
+    # ── Advanced Loading Animation ──
+    with st.spinner("🤖 AI is analyzing the session data..."):
+        time.sleep(1.5)  # Add dramatic suspense for the prediction
+        
     warnings = []
     if product_related == 0 and product_related_duration > 0:
         warnings.append(
@@ -425,6 +445,13 @@ if submitted:
             confidence_pct = (
                 purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
             )
+            
+            # Trigger Success/Failure animations based on prediction
+            if prediction == 1:
+                st.balloons()
+            else:
+                st.snow()
+                
             verdict_banner(bool(prediction == 1), confidence_pct)
 
             if proba is not None:
@@ -450,40 +477,80 @@ if submitted:
         else:
             st.markdown("---")
             st.subheader("🤖 Multiple Model Predictions")
+
             if "_last_random_truth" in st.session_state:
                 truth = st.session_state["_last_random_truth"]
                 truth_label = "Purchase" if truth == 1 else "No Purchase"
                 st.info(f"📌 Actual recorded outcome: **{truth_label}**")
 
-            cols = st.columns(len(models))
-            for col, (name, info) in zip(cols, models.items()):
+            # ── Collect all predictions first ────────────────────────────
+            all_results = []
+            for name, info in models.items():
+                model = info["model"]
+                try:
+                    pred = model.predict(input_data)[0]
+                    prob = (
+                        model.predict_proba(input_data)[0]
+                        if hasattr(model, "predict_proba")
+                        else None
+                    )
+                    pur_prob = float(prob[1]) if prob is not None else float(pred)
+                    all_results.append({
+                        "name": name,
+                        "icon": model_icon(info["stem"]),
+                        "pred": pred,
+                        "prob": prob,
+                        "pur_prob": pur_prob,
+                        "error": None,
+                    })
+                except Exception as e:
+                    all_results.append({
+                        "name": name,
+                        "icon": model_icon(info["stem"]),
+                        "pred": None,
+                        "prob": None,
+                        "pur_prob": None,
+                        "error": str(e),
+                    })
+
+            # ── Determine consensus and trigger correct animation ────────
+            valid_preds = [r["pred"] for r in all_results if r["pred"] is not None]
+            purchase_count = sum(1 for p in valid_preds if p == 1)
+            total_count = len(valid_preds)
+
+            if total_count > 0:
+                from src.ui_theme import multi_model_verdict_banner
+
+                if purchase_count == total_count:
+                    # All models agree: Purchase → balloons
+                    st.balloons()
+                elif purchase_count == 0:
+                    # All models agree: No Purchase → snow
+                    st.snow()
+                # Mixed results → no balloons/snow, just the amber banner
+
+                multi_model_verdict_banner(purchase_count, total_count)
+
+            # ── Display per-model cards ──────────────────────────────────
+            cols = st.columns(len(all_results))
+            for col, result in zip(cols, all_results):
                 with col:
-                    model = info["model"]
-                    icon = model_icon(info["stem"])
-                    st.markdown(f"**{icon} {name}**")
+                    st.markdown(f"**{result['icon']} {result['name']}**")
 
-                    try:
-                        pred = model.predict(input_data)[0]
-                        prob = (
-                            model.predict_proba(input_data)[0]
-                            if hasattr(model, "predict_proba")
-                            else None
-                        )
-                        pur_prob = float(prob[1]) if prob is not None else float(pred)
+                    if result["error"]:
+                        st.error(f"Error: {result['error']}")
+                        continue
 
-                        if pred == 1:
-                            st.success("🛒 Purchase")
-                        else:
-                            st.error("❌ No Purchase")
+                    if result["pred"] == 1:
+                        st.success("🛒 Purchase")
+                    else:
+                        st.error("❌ No Purchase")
 
-                        if prob is not None:
-                            st.caption(f"Purchase Probability: {pur_prob*100:.1f}%")
-                            probability_meter(pur_prob)
-                        else:
-                            st.caption("No probability available")
-
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                    if result["prob"] is not None:
+                        st.caption(f"Purchase Probability: {result['pur_prob']*100:.1f}%")
+                        probability_meter(result["pur_prob"])
+                    else:
+                        st.caption("No probability available")
 
         with st.expander("📋 Input summary", expanded=False):
             st.dataframe(input_data, width="stretch")
