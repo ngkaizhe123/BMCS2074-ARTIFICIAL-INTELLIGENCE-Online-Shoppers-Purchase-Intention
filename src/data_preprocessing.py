@@ -35,21 +35,26 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from imblearn.over_sampling import SMOTE, SMOTENC
+from imblearn.over_sampling import SMOTE
 from scipy import stats
 from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-CATEGORICAL_FEATURES = ["Month", "VisitorType", "Weekend"]
+CATEGORICAL_FEATURES = [
+    "Month",
+    "VisitorType",
+    "Weekend",
+    "OperatingSystems",
+    "Browser",
+    "Region",
+    "TrafficType",
+]
 
-# All numeric-typed columns (used for encoding / scaling). This includes the
-# 4 ordinal/ID-coded columns (OperatingSystems, Browser, Region, TrafficType)
-# since scaling them alongside true numerics is a common, harmless choice.
+# All numeric-typed columns (used for scaling).
 NUMERICAL_FEATURES = [
     "Administrative",
     "Administrative_Duration",
@@ -60,11 +65,6 @@ NUMERICAL_FEATURES = [
     "BounceRates",
     "ExitRates",
     "PageValues",
-    "SpecialDay",
-    "OperatingSystems",
-    "Browser",
-    "Region",
-    "TrafficType",
 ]
 
 # Numerical features selected for outlier detection based on EDA.
@@ -635,6 +635,48 @@ def validate_categorical_values(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def drop_special_day(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop SpecialDay column from the dataset as requested.
+    """
+    if "SpecialDay" in df.columns:
+        print("    [drop_special_day] Dropping 'SpecialDay' column.")
+        df = df.drop(columns=["SpecialDay"])
+    return df
+
+
+def group_rare_categories(
+    df: pd.DataFrame,
+    threshold: int = 10,
+    rare_map: dict[str, list[str]] | None = None,
+) -> pd.DataFrame:
+    """
+    Group rare categories into an 'Other_xxx' category.
+    This applies to integer ID-coded categorical features (OperatingSystems, Browser,
+    TrafficType, Region) to reduce noise and dimensionality before One-Hot Encoding.
+    """
+    df = df.copy()
+    cols_to_group = ["OperatingSystems", "Browser", "TrafficType", "Region"]
+    for col in cols_to_group:
+        if col in df.columns:
+            # Convert column to string so we can mix original IDs with 'Other_xxx'
+            df[col] = df[col].astype(str)
+            if rare_map and col in rare_map:
+                rare_cats = rare_map[col]
+            elif len(df) >= threshold:
+                counts = df[col].value_counts()
+                rare_cats = counts[counts < threshold].index.tolist()
+            else:
+                rare_cats = []
+
+            if len(rare_cats) > 0:
+                print(
+                    f"    [{col}] Grouping {len(rare_cats)} rare categories into 'Other_{col}'."
+                )
+                df.loc[df[col].isin(rare_cats), col] = f"Other_{col}"
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Step 11 – Unified Cleaning Pipeline (used for CSV export & preprocess_data)
 # ---------------------------------------------------------------------------
@@ -661,8 +703,9 @@ def run_preprocessing_pipeline(
     5. cap_duration_outliers        – Cap extreme durations to business limits
     6. clip_rates                   – Enforce BounceRates/ExitRates in [0,1]
     7. validate_categorical_values  – Replace invalid category values
-    8. remove_outliers_*            – Optional IQR or Z-score outlier removal
-    9. encode_target                – Revenue bool → int
+    8. group_rare_categories        – Group rare ID categories into 'Other_xxx'
+    9. remove_outliers_*            – Optional IQR or Z-score outlier removal
+    10. encode_target               – Revenue bool → int
     """
     print(f"\n[run_preprocessing_pipeline] Starting. Input shape: {df.shape}")
 
@@ -676,6 +719,8 @@ def run_preprocessing_pipeline(
     df = cap_duration_outliers(df)
     df = clip_rates(df)
     df = validate_categorical_values(df)
+    df = group_rare_categories(df)
+    df = drop_special_day(df)
 
     # --- Statistical outlier removal (optional) ---
     if outlier_method == "iqr":
@@ -762,50 +807,6 @@ def get_smote(random_state: int = 42) -> SMOTE:
     return SMOTE(random_state=random_state)
 
 
-def get_smotenc(X: pd.DataFrame, random_state: int = 42) -> SMOTENC:
-    """
-    Return a SMOTENC instance with categorical feature indices auto-detected
-    from CATEGORICAL_FEATURES and the column order of X.
-
-    Why SMOTENC instead of plain SMOTE
-    ------------------------------------
-    Plain SMOTE treats ALL features as continuous and generates synthetic
-    samples by linear interpolation between k-nearest neighbours.
-    This is incorrect for nominal categorical features:
-      - Month (string): interpolating 'Feb' and 'Nov' produces a meaningless
-        fractional value.
-      - VisitorType (string): 'New_Visitor' and 'Returning_Visitor' have no
-        numeric midpoint.
-      - Weekend (bool): interpolation yields non-boolean values between 0 and 1.
-
-    SMOTENC (SMOTE for Nominal and Continuous features) handles mixed-type
-    datasets by:
-      - Numerical features: standard SMOTE interpolation between neighbours.
-      - Categorical features: selects the most frequent category among the
-        k-nearest neighbours (mode imputation), preserving valid category values.
-
-    Pipeline placement
-    ------------------
-    SMOTENC MUST be placed BEFORE the ColumnTransformer in the imblearn
-    Pipeline so it operates on the raw (pre-OHE) DataFrame where:
-      - Month and VisitorType are still strings (valid category values).
-      - Weekend is still bool.
-    After OneHotEncoding these become binary columns, making SMOTENC
-    unnecessary and equivalent to SMOTE.
-
-    Parameters
-    ----------
-    X : pd.DataFrame
-        Training feature DataFrame (pre-preprocessor). Used to detect
-        categorical column indices from CATEGORICAL_FEATURES at runtime,
-        making this robust to column reordering.
-    random_state : int
-        Seed for reproducibility.
-    """
-    cat_indices = [i for i, col in enumerate(X.columns) if col in CATEGORICAL_FEATURES]
-    return SMOTENC(categorical_features=cat_indices, random_state=random_state)
-
-
 # ---------------------------------------------------------------------------
 # Step 9 – Full Data Pipeline (Compatible with All Models)
 # ---------------------------------------------------------------------------
@@ -814,27 +815,19 @@ def get_smotenc(X: pd.DataFrame, random_state: int = 42) -> SMOTENC:
 def preprocess_data(
     filepath: str = "data/raw/online_shoppers_intention.csv",
     outlier_method: str = "none",
-    test_size: float = 0.2,
-    random_state: int = 42,
-    transform: bool = False,
-    scale_numerical: bool = False,
-) -> tuple:
+) -> pd.DataFrame:
     """
-    Load, clean, split data.
+    Load and clean data.
 
     Parameters
     ----------
     filepath        : Path to dataset CSV.
     outlier_method  : 'none' | 'iqr' | 'zscore'
-    test_size       : Split ratio for testing set.
-    random_state    : Seed for reproducibility.
-    transform       : If True, returns transformed numpy matrices & fitted preprocessor.
-                      If False, returns raw DataFrames X_train, X_test (ideal for imblearn Pipeline).
-    scale_numerical : Whether to apply StandardScaler to numerical features.
 
     Returns
     -------
-    (X_train, X_test, y_train, y_test, preprocessor)
+    pd.DataFrame
+        The cleaned dataset.
     """
     # 1. Load
     df = load_data(filepath)
@@ -842,27 +835,7 @@ def preprocess_data(
     # 2–5. Clean (duplicates → missing values → outliers → encode target)
     df = run_preprocessing_pipeline(df, outlier_method=outlier_method)
 
-    # 6. Feature / Target split
-    X = df.drop(TARGET, axis=1)
-    y = df[TARGET]
-
-    # 7. Train / Test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y,
-    )
-
-    preprocessor = build_preprocessor(scale_numerical=scale_numerical)
-
-    if transform:
-        X_train_processed = preprocessor.fit_transform(X_train)
-        X_test_processed = preprocessor.transform(X_test)
-        return X_train_processed, X_test_processed, y_train, y_test, preprocessor
-
-    return X_train, X_test, y_train, y_test, preprocessor
+    return df
 
 
 # ---------------------------------------------------------------------------

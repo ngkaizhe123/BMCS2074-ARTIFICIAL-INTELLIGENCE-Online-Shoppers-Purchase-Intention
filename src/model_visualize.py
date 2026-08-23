@@ -23,7 +23,12 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.data_preprocessing import preprocess_data
-from src.utils import evaluate_model, plot_confusion_matrix, plot_roc_curve
+from src.utils import (
+    evaluate_model,
+    plot_confusion_matrix,
+    plot_roc_curve,
+    split_dataset,
+)
 
 SAVED_DIR = project_root / "saved_models"
 PLOT_DIR = project_root / "report_assets" / "plots"
@@ -55,10 +60,10 @@ def main():
         return
 
     print(f"[*] Found {len(models)} models. Loading test data...")
-    X_train, X_test, y_train, y_test, _ = preprocess_data(
+    df = preprocess_data(
         filepath=str(project_root / "data" / "raw" / "online_shoppers_intention.csv"),
-        transform=False,
     )
+    X_train, X_test, y_train, y_test = split_dataset(df)
 
     all_metrics = {}
 

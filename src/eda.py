@@ -1,29 +1,28 @@
 """
 eda.py
 ------
-Exploratory Data Analysis for the Online Shoppers Intention dataset.
+Exploratory Data Analysis (EDA) for Online Shoppers Purchasing Intention dataset.
 
-Sections
---------
- 1.  Dataset Overview & Quality Check
- 2.  Target Distribution & Imbalance
- 3.  Numerical Feature Distributions
- 4.  Box Plots (Outlier Inspection)
- 5.  Categorical Feature Distributions
- 6.  Correlation Heatmap
- 7.  PageValues Deep-Dive
- 8.  BounceRates / ExitRates Analysis
- 9.  Monthly Purchase Rate
-10.  Visitor Type Analysis
-11.  Weekend Effect
-12.  Feature Interaction Analysis
-13.  Statistical Summary Table
-14.  Key Findings Summary
+Sections:
+ 1. Dataset Overview & Quality Check
+ 2. Target Distribution & Imbalance
+ 3. Numerical Feature Distributions (per feature)
+ 4. Box Plots & Outlier Inspection (per feature)
+ 5. Categorical Feature Purchase Rates
+ 6. Categorical Frequency & Low-Count Category Inspection (per feature)
+ 7. Correlation Heatmap
+ 8. PageValues Deep-Dive
+ 9. BounceRates & ExitRates Analysis
+10. Monthly Purchase Rate Analysis
+11. Visitor Type Analysis
+12. Weekend Effect Analysis
+13. Feature Interaction Analysis
+14. Statistical Summary & Hypothesis Testing
+15. Key Findings Summary
 
-Usage (from project root)
---------------------------
+Usage:
     from src.eda import run_eda
-    df = run_eda(save_dir="report_assets/plots")
+    df = run_eda(save_dir="report_assets/plots/eda")
 """
 
 from __future__ import annotations
@@ -46,10 +45,10 @@ sys.path.append(str(project_root))
 warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
-# Shared style
+# Shared Visual Style & Feature Definitions
 # ---------------------------------------------------------------------------
 
-PALETTE_BINARY = ["#4C72B0", "#DD8452"]  # blue = 0 / No, orange = 1 / Yes
+PALETTE_BINARY = ["#4C72B0", "#DD8452"]  # blue = No Purchase (0), orange = Purchase (1)
 SNS_STYLE = "whitegrid"
 
 NUMERICAL_FEATURES = [
@@ -62,12 +61,10 @@ NUMERICAL_FEATURES = [
     "BounceRates",
     "ExitRates",
     "PageValues",
-    "SpecialDay",
 ]
 
 CATEGORICAL_FEATURES = ["Month", "VisitorType", "Weekend"]
 ORDINAL_FEATURES = ["OperatingSystems", "Browser", "Region", "TrafficType"]
-
 MONTH_ORDER = ["Feb", "Mar", "May", "June", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -93,13 +90,12 @@ def _save_show(fig: plt.Figure, name: str, save_dir: str | None, show: bool) -> 
 # ===================================================================
 
 
-# Checks raw dataset shape, dtypes, duplicate rows, and missing values.
-# Duplicates found here (125 rows) -> handled by remove_duplicates() in data_preprocessing.py.
-# Missing values confirmed as 0 -> handle_missing_values() is kept in the pipeline as a safeguard.
-# Revenue dtype is bool -> encode_target() converts it to int (0/1) before model training.
 def plot_dataset_overview(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Inspect raw dataset dimensions, data types, missing values, and duplicate records.
+    """
     print("=" * 70)
     print("1. DATASET OVERVIEW & QUALITY CHECK")
     print("=" * 70)
@@ -115,8 +111,9 @@ def plot_dataset_overview(
     print(f"\n  Data Types:")
     for col in df.columns:
         print(f"    {col:<30s} {str(df[col].dtype)}")
+    num_cols = [c for c in NUMERICAL_FEATURES if c in df.columns]
     print(f"\n  Numerical Summary:")
-    print(df[NUMERICAL_FEATURES].describe().round(3).to_string())
+    print(df[num_cols].describe().round(3).to_string())
 
 
 # ===================================================================
@@ -124,30 +121,26 @@ def plot_dataset_overview(
 # ===================================================================
 
 
-# Shows the class imbalance: ~84.5% No Purchase vs ~15.5% Purchase (ratio ~5.4:1).
-# -> get_smote() in data_preprocessing.py oversamples the minority class (Purchase=1)
-#    inside the imblearn Pipeline, so resampling only happens on training folds (no data leakage).
-# -> train_test_split uses stratify=y to preserve this ratio across train/test splits.
 def plot_target_distribution(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Examine the class distribution of the target variable (Revenue) to evaluate class imbalance.
+    """
     counts = df["Revenue"].value_counts().sort_index()
     labels = ["No Purchase (0)", "Purchase (1)"]
     pcts = counts / counts.sum() * 100
     ratio = counts[0] / counts[1]
 
     sns.set_style(SNS_STYLE)
-
-    # Only create 2 subplots because we have 2 charts
     fig, axes = plt.subplots(1, 2, figsize=(11, 5))
-    fig.suptitle("Target Variable – Revenue", fontsize=14, fontweight="bold")
+    fig.suptitle(
+        "Target Variable Distribution (Revenue)", fontsize=14, fontweight="bold"
+    )
 
-    # ---------------------------------------------------------
-    # 1. Bar chart
-    # ---------------------------------------------------------
+    # Bar chart
     bars = axes[0].bar(labels, counts.values, color=PALETTE_BINARY, edgecolor="w")
-
-    axes[0].set_title("Count")
+    axes[0].set_title("Session Counts by Class")
     axes[0].set_ylabel("Sessions")
 
     for b, c, p in zip(bars, counts.values, pcts.values):
@@ -159,9 +152,7 @@ def plot_target_distribution(
             fontsize=10,
         )
 
-    # ---------------------------------------------------------
-    # 2. Pie chart
-    # ---------------------------------------------------------
+    # Pie chart
     axes[1].pie(
         counts.values,
         labels=labels,
@@ -170,8 +161,7 @@ def plot_target_distribution(
         startangle=90,
         wedgeprops={"edgecolor": "w"},
     )
-
-    axes[1].set_title("Proportion")
+    axes[1].set_title("Class Proportion")
 
     plt.tight_layout()
     _save_show(fig, "01_target_distribution", save_dir, show)
@@ -184,95 +174,83 @@ def plot_target_distribution(
 
 
 # ===================================================================
-# 3. Numerical Feature Distributions
+# 3. Numerical Feature Distributions (Per Feature)
 # ===================================================================
 
 
-# Histograms reveal heavy right-skew and long tails across most numerical features.
-# -> For distance-sensitive models (KNN, SVM): remove_outliers_iqr() or remove_outliers_zscore()
-#    should be used (outlier_method='iqr' or 'zscore' in preprocess_data()).
-# -> For tree-based models (XGBoost): robust to skew by design; outlier_method='none' (default).
-# -> StandardScaler in build_preprocessor(scale_numerical=True) is applied for KNN/SVM
-#    to normalise magnitudes before distance computation.
 def plot_numerical_distributions(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Analyze distribution shape, density, and skewness for each numerical feature across target classes.
+    """
     sns.set_style(SNS_STYLE)
-    n_cols = 2
-    n_rows = int(np.ceil(len(NUMERICAL_FEATURES) / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, n_rows * 3.5))
-    axes = axes.flatten()
+    num_cols = [c for c in NUMERICAL_FEATURES if c in df.columns]
 
-    for i, col in enumerate(NUMERICAL_FEATURES):
-        ax = axes[i]
+    for col in num_cols:
+        fig, ax = plt.subplots(figsize=(9, 5))
         for rev, color, lbl in zip([0, 1], PALETTE_BINARY, ["No Purchase", "Purchase"]):
             s = df.loc[df["Revenue"] == rev, col].dropna()
-            ax.hist(s, bins=40, alpha=0.5, color=color, label=lbl, density=True)
-            s.plot.kde(ax=ax, color=color, lw=1.5)
-        ax.set_title(col, fontsize=10)
-        ax.set_xlabel("")
-        ax.legend(fontsize=7)
-
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-
-    fig.suptitle(
-        "Numerical Features by Revenue", fontsize=14, fontweight="bold", y=1.01
-    )
-    plt.tight_layout()
-    _save_show(fig, "02_numerical_distributions", save_dir, show)
+            ax.hist(s, bins=40, alpha=0.45, color=color, label=lbl, density=True)
+            if s.std() > 0:
+                s.plot.kde(ax=ax, color=color, lw=1.8)
+        skew_val = df[col].skew()
+        ax.set_title(f"{col} – Distribution by Revenue", fontsize=12, fontweight="bold")
+        ax.set_xlabel(col)
+        ax.set_ylabel("Density")
+        ax.legend(fontsize=10)
+        ax.text(
+            0.97,
+            0.95,
+            f"Skewness: {skew_val:+.2f}",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=9,
+            bbox=dict(boxstyle="round", fc="#f5f5f5", alpha=0.85),
+        )
+        plt.tight_layout()
+        _save_show(fig, f"02_dist_{col}", save_dir, show)
 
 
 # ===================================================================
-# 4. Box Plots
+# 4. Box Plots & Outlier Inspection (Per Feature)
 # ===================================================================
 
 
-# Box plots show extreme outliers in: Administrative, Administrative_Duration,
-# ProductRelated, ProductRelated_Duration, BounceRates, ExitRates.
-# -> These 6 columns form CONTINUOUS_FEATURES_FOR_OUTLIERS in data_preprocessing.py;
-#    only these are used for IQR/Z-score outlier removal.
-# Informational*, PageValues, and SpecialDay are intentionally EXCLUDED from outlier removal
-# because their IQR == 0 (zero-inflated): applying IQR would flag nearly all non-zero
-# values as outliers, deleting the majority of the purchasing sessions.
 def plot_boxplots(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Inspect feature spread, dispersion, and extreme outliers for each numerical feature.
+    """
     sns.set_style(SNS_STYLE)
-    n_cols = 2
-    n_rows = int(np.ceil(len(NUMERICAL_FEATURES) / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, n_rows * 3))
-    axes = axes.flatten()
+    num_cols = [c for c in NUMERICAL_FEATURES if c in df.columns]
 
-    for i, col in enumerate(NUMERICAL_FEATURES):
-        ax = axes[i]
+    for col in num_cols:
+        fig, ax = plt.subplots(figsize=(8, 5))
         sns.boxplot(data=df, x="Revenue", y=col, ax=ax, palette=PALETTE_BINARY)
-        ax.set_title(col, fontsize=10)
-        ax.set_xticklabels(["No", "Yes"])
+        ax.set_title(
+            f"{col} – Outlier Inspection by Revenue", fontsize=12, fontweight="bold"
+        )
+        ax.set_xticklabels(["No Purchase", "Purchase"])
         ax.set_xlabel("")
-
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
-
-    fig.suptitle("Box Plots by Revenue", fontsize=14, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    _save_show(fig, "03_boxplots", save_dir, show)
+        ax.set_ylabel(col)
+        plt.tight_layout()
+        _save_show(fig, f"03_boxplot_{col}", save_dir, show)
 
 
 # ===================================================================
-# 5. Categorical Feature Distributions
+# 5. Categorical Feature Distributions & Purchase Rates
 # ===================================================================
 
 
-# Stacked bar charts show purchase rate by each categorical feature.
-# Month, VisitorType, and Weekend are nominal (no numeric ordering)
-# -> OneHotEncoder is applied to CATEGORICAL_FEATURES in build_preprocessor().
-# OperatingSystems, Browser, Region, TrafficType are integer-coded IDs with no
-# meaningful numeric scale -> treated as NUMERICAL_FEATURES (passthrough for XGBoost,
-# StandardScaler for KNN/SVM).
 def plot_categorical_distributions(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Evaluate conversion rates across categorical variables using stacked proportions.
+    """
     sns.set_style(SNS_STYLE)
     all_cats = CATEGORICAL_FEATURES + ORDINAL_FEATURES
     n_cols = 2
@@ -281,11 +259,13 @@ def plot_categorical_distributions(
     axes = axes.flatten()
 
     for i, col in enumerate(all_cats):
+        if col not in df.columns:
+            continue
         ax = axes[i]
         ct = pd.crosstab(df[col], df["Revenue"], normalize="index") * 100
         ct.columns = ["No Purchase", "Purchase"]
         ct.plot(kind="bar", stacked=True, ax=ax, color=PALETTE_BINARY, edgecolor="w")
-        ax.set_title(col, fontsize=10)
+        ax.set_title(f"Purchase Rate by {col}", fontsize=10, fontweight="bold")
         ax.set_xlabel("")
         ax.yaxis.set_major_formatter(mtick.PercentFormatter())
         ax.legend(fontsize=7)
@@ -294,71 +274,150 @@ def plot_categorical_distributions(
     for j in range(i + 1, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("Purchase Rate by Category", fontsize=14, fontweight="bold", y=1.01)
+    fig.suptitle(
+        "Conversion Rate Proportions across Categories",
+        fontsize=14,
+        fontweight="bold",
+        y=1.01,
+    )
     plt.tight_layout()
-    _save_show(fig, "04_categorical_distributions", save_dir, show)
+    _save_show(fig, "04_categorical_purchase_rate", save_dir, show)
 
 
 # ===================================================================
-# 6. Correlation Heatmap
+# 6. Categorical Frequency & Low-Count Category Inspection (Per Feature)
 # ===================================================================
 
 
-# Correlation heatmap identifies which features are most predictive of Revenue.
-# PageValues has the strongest positive correlation (~0.49) with Revenue
-# -> PageValues is intentionally excluded from CONTINUOUS_FEATURES_FOR_OUTLIERS
-#    so that outlier removal does not destroy the most informative feature.
-# BounceRates and ExitRates are highly correlated with each other (~0.91)
-# -> both columns are kept; no dimensionality reduction is applied at this stage.
+def plot_ordinal_rare_categories(
+    df: pd.DataFrame,
+    save_dir: str | None = None,
+    show: bool = True,
+    threshold: int = 10,
+) -> None:
+    """
+    Examine category frequency distributions for ID-coded categorical features
+    to identify low-frequency categories (count < threshold).
+    """
+    sns.set_style(SNS_STYLE)
+
+    for col in ORDINAL_FEATURES:
+        if col not in df.columns:
+            continue
+        fig, ax = plt.subplots(figsize=(9, 5))
+        counts = df[col].value_counts().sort_index()
+        colors = [
+            "#E74C3C" if c < threshold else PALETTE_BINARY[0] for c in counts.values
+        ]
+        bars = ax.bar(
+            counts.index.astype(str), counts.values, color=colors, edgecolor="w"
+        )
+        ax.axhline(
+            y=threshold,
+            color="red",
+            linestyle="--",
+            lw=1.5,
+            label=f"Low Count Threshold (< {threshold})",
+        )
+        n_rare = (counts < threshold).sum()
+        n_total = len(counts)
+        ax.set_title(
+            f"{col} – Category Frequencies ({n_rare} / {n_total} categories < {threshold} samples)",
+            fontsize=12,
+            fontweight="bold",
+        )
+        ax.set_xlabel(f"{col} Category ID")
+        ax.set_ylabel("Sample Count")
+        ax.legend(fontsize=9)
+
+        for bar, count in zip(bars, counts.values):
+            if count < threshold:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + max(counts.values) * 0.01,
+                    str(count),
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    color="#E74C3C",
+                    fontweight="bold",
+                )
+
+        plt.tight_layout()
+        _save_show(fig, f"05_count_{col}", save_dir, show)
+
+    print(f"\n  Category counts below threshold ({threshold}):")
+    for col in ORDINAL_FEATURES:
+        if col in df.columns:
+            counts = df[col].value_counts()
+            rare = counts[counts < threshold]
+            print(f"    {col:<20s}: {len(rare)} categories with count < {threshold}")
+
+
+# ===================================================================
+# 7. Correlation Heatmap
+# ===================================================================
+
+
 def plot_correlation_heatmap(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
-    cols = NUMERICAL_FEATURES + ["Revenue"]
+    """
+    Evaluate linear relationships and collinearity among all numeric features and the target variable.
+    EDA runs on the raw dataset, so ORDINAL_FEATURES are still integers and included here.
+    """
+    # Include both continuous numerical features AND integer-coded ordinal features
+    all_numeric = NUMERICAL_FEATURES + ORDINAL_FEATURES
+    cols = [c for c in all_numeric if c in df.columns] + ["Revenue"]
     corr = df[cols].corr()
 
-    mask = np.triu(np.ones_like(corr, dtype=bool))
-    fig, ax = plt.subplots(figsize=(12, 9))
+    n = len(cols)
+    fig_size = max(10, n)  # scale figure with number of features
+    fig, ax = plt.subplots(figsize=(fig_size, fig_size - 1))
     sns.heatmap(
         corr,
-        mask=mask,
         annot=True,
         fmt=".2f",
         cmap="coolwarm",
         center=0,
         linewidths=0.5,
+        square=True,
+        cbar_kws={"shrink": 0.8},
         ax=ax,
-        annot_kws={"size": 8},
+        annot_kws={"size": 7},
     )
-    ax.set_title("Correlation Heatmap", fontsize=13, fontweight="bold")
+    ax.set_title(
+        "Feature Correlation Matrix (All Numeric Features)",
+        fontsize=13,
+        fontweight="bold",
+    )
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=8)
     plt.tight_layout()
-    _save_show(fig, "05_correlation_heatmap", save_dir, show)
+    _save_show(fig, "06_correlation_heatmap", save_dir, show)
 
-    # Print top correlations with Revenue
     rev_corr = corr["Revenue"].drop("Revenue").sort_values(ascending=False)
-    print("\n  Correlation with Revenue (top 5):")
+    print("\n  Top correlations with Revenue:")
     for feat, val in rev_corr.head(5).items():
         print(f"    {feat:<30s} {val:+.4f}")
 
 
 # ===================================================================
-# 7. PageValues Deep-Dive
+# 8. PageValues Deep-Dive
 # ===================================================================
 
 
-# Deep-dive shows PageValues is zero in ~75% of sessions (zero-inflated).
-# The IQR of PageValues equals 0 across this distribution, so IQR-based outlier
-# removal would incorrectly flag ALL non-zero PageValues as outliers.
-# -> PageValues is excluded from CONTINUOUS_FEATURES_FOR_OUTLIERS in data_preprocessing.py.
-# Sessions with PageValues > 0 have a ~49% purchase rate vs ~2% when PageValues == 0,
-# confirming it is the single most important feature and must not be removed.
 def plot_pagevalues_deep_dive(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Perform a detailed analysis of PageValues due to its zero-inflated distribution and high predictive power.
+    """
     sns.set_style(SNS_STYLE)
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle("PageValues – Deep-Dive", fontsize=14, fontweight="bold")
+    fig.suptitle("PageValues Feature Analysis", fontsize=14, fontweight="bold")
 
-    # (a) Violin
+    # Violin plot
     sns.violinplot(
         data=df,
         x="Revenue",
@@ -367,10 +426,10 @@ def plot_pagevalues_deep_dive(
         palette=PALETTE_BINARY,
         inner="quartile",
     )
-    axes[0, 0].set_xticklabels(["No", "Yes"])
-    axes[0, 0].set_title("Distribution by Revenue")
+    axes[0, 0].set_xticklabels(["No Purchase", "Purchase"])
+    axes[0, 0].set_title("Distribution by Revenue Class")
 
-    # (b) Zero vs Non-zero
+    # Zero vs Non-zero summary
     pv_zero = (df["PageValues"] == 0).mean() * 100
     pv_nz_rate = df.loc[df["PageValues"] > 0, "Revenue"].mean() * 100
     pv_z_rate = df.loc[df["PageValues"] == 0, "Revenue"].mean() * 100
@@ -378,11 +437,11 @@ def plot_pagevalues_deep_dive(
     axes[0, 1].axis("off")
     txt = (
         f"PageValues = 0 : {pv_zero:.1f}% of sessions\n"
-        f"  → Purchase rate: {pv_z_rate:.2f}%\n\n"
+        f"  → Conversion rate: {pv_z_rate:.2f}%\n\n"
         f"PageValues > 0 : {100 - pv_zero:.1f}% of sessions\n"
-        f"  → Purchase rate: {pv_nz_rate:.2f}%\n\n"
-        f"⚡ PageValues > 0 is a strong\n"
-        f"   signal for purchase."
+        f"  → Conversion rate: {pv_nz_rate:.2f}%\n\n"
+        f"Key Insight: Non-zero PageValues strongly\n"
+        f"correlates with purchase completion."
     )
     axes[0, 1].text(
         0.05,
@@ -393,13 +452,14 @@ def plot_pagevalues_deep_dive(
         bbox=dict(boxstyle="round", fc="#f5f5f5"),
     )
 
-    # (c) Histogram of PageValues > 0
+    # Non-zero distribution
     pv_pos = df.loc[df["PageValues"] > 0, "PageValues"]
     axes[1, 0].hist(pv_pos, bins=50, color=PALETTE_BINARY[1], alpha=0.7, edgecolor="w")
-    axes[1, 0].set_title("PageValues > 0 Distribution")
+    axes[1, 0].set_title("Distribution of Non-Zero PageValues")
     axes[1, 0].set_xlabel("PageValues")
+    axes[1, 0].set_ylabel("Frequency")
 
-    # (d) PageValues vs ExitRates scatter (sampled)
+    # Scatter vs ExitRates
     sample = df.sample(min(3000, len(df)), random_state=42)
     axes[1, 1].scatter(
         sample["PageValues"],
@@ -411,29 +471,28 @@ def plot_pagevalues_deep_dive(
     )
     axes[1, 1].set_xlabel("PageValues")
     axes[1, 1].set_ylabel("ExitRates")
-    axes[1, 1].set_title("PageValues vs ExitRates")
+    axes[1, 1].set_title("PageValues vs. ExitRates")
 
     plt.tight_layout()
-    _save_show(fig, "06_pagevalues_deep_dive", save_dir, show)
+    _save_show(fig, "07_pagevalues_deep_dive", save_dir, show)
 
 
 # ===================================================================
-# 8. BounceRates / ExitRates Analysis
+# 9. BounceRates & ExitRates Analysis
 # ===================================================================
 
 
-# BounceRates and ExitRates both appear in CONTINUOUS_FEATURES_FOR_OUTLIERS
-# and are included in IQR/Z-score outlier removal for KNN/SVM pipelines.
-# Their high mutual correlation (~0.91) is visualised here to confirm both
-# carry overlapping but complementary signal — neither is dropped.
 def plot_bounce_exit_analysis(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Examine the relationship and distributions of BounceRates and ExitRates with respect to user purchase behavior.
+    """
     sns.set_style(SNS_STYLE)
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    fig.suptitle("BounceRates & ExitRates", fontsize=14, fontweight="bold")
+    fig.suptitle("BounceRates & ExitRates Relationship", fontsize=14, fontweight="bold")
 
-    # Scatter BounceRates vs ExitRates
+    # Scatter
     sample = df.sample(min(4000, len(df)), random_state=42)
     axes[0].scatter(
         sample["BounceRates"],
@@ -445,36 +504,35 @@ def plot_bounce_exit_analysis(
     )
     axes[0].set_xlabel("BounceRates")
     axes[0].set_ylabel("ExitRates")
-    axes[0].set_title("BounceRates vs ExitRates")
+    axes[0].set_title("BounceRates vs. ExitRates Scatter")
 
-    # Box: BounceRates by Revenue
+    # Boxplot BounceRates
     sns.boxplot(
         data=df, x="Revenue", y="BounceRates", ax=axes[1], palette=PALETTE_BINARY
     )
-    axes[1].set_xticklabels(["No", "Yes"])
-    axes[1].set_title("BounceRates by Revenue")
+    axes[1].set_xticklabels(["No Purchase", "Purchase"])
+    axes[1].set_title("BounceRates by Target Class")
 
-    # Box: ExitRates by Revenue
+    # Boxplot ExitRates
     sns.boxplot(data=df, x="Revenue", y="ExitRates", ax=axes[2], palette=PALETTE_BINARY)
-    axes[2].set_xticklabels(["No", "Yes"])
-    axes[2].set_title("ExitRates by Revenue")
+    axes[2].set_xticklabels(["No Purchase", "Purchase"])
+    axes[2].set_title("ExitRates by Target Class")
 
     plt.tight_layout()
-    _save_show(fig, "07_bounce_exit_analysis", save_dir, show)
+    _save_show(fig, "08_bounce_exit_analysis", save_dir, show)
 
 
 # ===================================================================
-# 9. Monthly Purchase Rate
+# 10. Monthly Purchase Rate Analysis
 # ===================================================================
 
 
-# Month is a string categorical with no inherent numeric ordering.
-# -> Included in CATEGORICAL_FEATURES and OneHotEncoded in build_preprocessor().
-# Monthly variation in purchase rate confirms Month carries predictive value
-# and should not be dropped or ordinally encoded.
 def plot_monthly_purchase_rate(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Analyze seasonality by examining monthly traffic volume and conversion rates.
+    """
     month_rate = (
         df.groupby("Month")["Revenue"]
         .agg(["mean", "count"])
@@ -492,10 +550,12 @@ def plot_monthly_purchase_rate(
         alpha=0.85,
         edgecolor="w",
     )
-    ax1.set_ylabel("Purchase Rate (%)", color=PALETTE_BINARY[1])
+    ax1.set_ylabel("Conversion Rate (%)", color=PALETTE_BINARY[1])
     ax1.yaxis.set_major_formatter(mtick.PercentFormatter())
     ax1.tick_params(axis="y", labelcolor=PALETTE_BINARY[1])
-    ax1.set_title("Monthly Sessions & Purchase Rate", fontsize=13, fontweight="bold")
+    ax1.set_title(
+        "Monthly Traffic Volume & Conversion Rate", fontsize=13, fontweight="bold"
+    )
 
     ax2 = ax1.twinx()
     ax2.plot(
@@ -506,7 +566,7 @@ def plot_monthly_purchase_rate(
         lw=2,
         label="Sessions",
     )
-    ax2.set_ylabel("Sessions", color=PALETTE_BINARY[0])
+    ax2.set_ylabel("Total Sessions", color=PALETTE_BINARY[0])
     ax2.tick_params(axis="y", labelcolor=PALETTE_BINARY[0])
 
     for b, r in zip(bars, month_rate["rate"]):
@@ -519,20 +579,20 @@ def plot_monthly_purchase_rate(
         )
 
     plt.tight_layout()
-    _save_show(fig, "08_monthly_purchase_rate", save_dir, show)
+    _save_show(fig, "09_monthly_purchase_rate", save_dir, show)
 
 
 # ===================================================================
-# 10. Visitor Type Analysis
+# 11. Visitor Type Analysis
 # ===================================================================
 
 
-# VisitorType is a nominal categorical with 3 values: Returning_Visitor,
-# New_Visitor, Other — no meaningful numeric ordering exists.
-# -> Included in CATEGORICAL_FEATURES and OneHotEncoded in build_preprocessor().
 def plot_visitor_type(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Compare total session volume and conversion rates across different visitor segments.
+    """
     vt = (
         df.groupby("VisitorType")["Revenue"]
         .agg(["sum", "count", "mean"])
@@ -542,41 +602,42 @@ def plot_visitor_type(
 
     sns.set_style(SNS_STYLE)
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle("Visitor Type Analysis", fontsize=14, fontweight="bold")
+    fig.suptitle("Visitor Type Segment Analysis", fontsize=14, fontweight="bold")
 
     x = np.arange(len(vt))
     w = 0.35
-    axes[0].bar(x - w / 2, vt["total"], w, label="Total", color=PALETTE_BINARY[0])
+    axes[0].bar(
+        x - w / 2, vt["total"], w, label="Total Sessions", color=PALETTE_BINARY[0]
+    )
     axes[0].bar(
         x + w / 2, vt["purchases"], w, label="Purchases", color=PALETTE_BINARY[1]
     )
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(vt.index)
-    axes[0].set_title("Sessions vs Purchases")
+    axes[0].set_title("Sessions vs. Conversions")
     axes[0].legend()
 
     axes[1].bar(vt.index, vt["rate"] * 100, color=PALETTE_BINARY[1], alpha=0.8)
     axes[1].yaxis.set_major_formatter(mtick.PercentFormatter())
-    axes[1].set_title("Purchase Rate by Visitor Type")
+    axes[1].set_title("Conversion Rate by Visitor Segment")
     for i, (idx, r) in enumerate(vt["rate"].items()):
         axes[1].text(i, r * 100 + 0.3, f"{r * 100:.1f}%", ha="center", fontsize=9)
 
     plt.tight_layout()
-    _save_show(fig, "09_visitor_type", save_dir, show)
+    _save_show(fig, "10_visitor_type_analysis", save_dir, show)
 
 
 # ===================================================================
-# 11. Weekend Effect
+# 12. Weekend Effect Analysis
 # ===================================================================
 
 
-# Weekend is a boolean feature (True/False) that shows a small but measurable
-# difference in purchase rate between weekday and weekend sessions.
-# -> Included in CATEGORICAL_FEATURES and OneHotEncoded in build_preprocessor().
-# Treating it as numeric would imply False < True ordering, which OneHotEncoding avoids.
 def plot_weekend_effect(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Evaluate purchase rate differences between weekday and weekend browsing sessions.
+    """
     wk = df.groupby("Weekend")["Revenue"].agg(["mean", "count"])
     wk.index = ["Weekday", "Weekend"]
 
@@ -584,8 +645,10 @@ def plot_weekend_effect(
     fig, ax = plt.subplots(figsize=(7, 5))
     bars = ax.bar(wk.index, wk["mean"] * 100, color=PALETTE_BINARY, edgecolor="w")
     ax.yaxis.set_major_formatter(mtick.PercentFormatter())
-    ax.set_title("Purchase Rate – Weekday vs Weekend", fontsize=12, fontweight="bold")
-    ax.set_ylabel("Purchase Rate (%)")
+    ax.set_title(
+        "Conversion Rate – Weekday vs. Weekend", fontsize=12, fontweight="bold"
+    )
+    ax.set_ylabel("Conversion Rate (%)")
     for b, (idx, r) in zip(bars, wk.iterrows()):
         ax.text(
             b.get_x() + b.get_width() / 2,
@@ -595,20 +658,23 @@ def plot_weekend_effect(
             fontsize=10,
         )
     plt.tight_layout()
-    _save_show(fig, "10_weekend_effect", save_dir, show)
+    _save_show(fig, "11_weekend_effect", save_dir, show)
 
 
 # ===================================================================
-# 12. Feature Interaction Analysis
+# 13. Feature Interaction Analysis
 # ===================================================================
 
 
 def plot_feature_interactions(
     df: pd.DataFrame, save_dir: str | None = None, show: bool = True
 ) -> None:
+    """
+    Explore multi-feature interactions and joint impacts on conversion probability.
+    """
     sns.set_style(SNS_STYLE)
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle("Feature Interactions", fontsize=14, fontweight="bold")
+    fig.suptitle("Feature Interaction Analysis", fontsize=14, fontweight="bold")
 
     # (a) ProductRelated_Duration vs PageValues
     sample = df.sample(min(3000, len(df)), random_state=42)
@@ -622,7 +688,7 @@ def plot_feature_interactions(
     )
     axes[0, 0].set_xlabel("ProductRelated_Duration")
     axes[0, 0].set_ylabel("PageValues")
-    axes[0, 0].set_title("Duration vs PageValues")
+    axes[0, 0].set_title("Duration vs. PageValues")
 
     # (b) Month × VisitorType purchase rate heatmap
     month_vt = df.groupby(["Month", "VisitorType"])["Revenue"].mean().unstack()
@@ -635,7 +701,7 @@ def plot_feature_interactions(
         ax=axes[0, 1],
         annot_kws={"size": 7},
     )
-    axes[0, 1].set_title("Purchase Rate (%) – Month × VisitorType")
+    axes[0, 1].set_title("Conversion Rate (%) – Month × VisitorType")
 
     # (c) BounceRates vs PageValues
     axes[1, 0].scatter(
@@ -648,7 +714,7 @@ def plot_feature_interactions(
     )
     axes[1, 0].set_xlabel("BounceRates")
     axes[1, 0].set_ylabel("PageValues")
-    axes[1, 0].set_title("BounceRates vs PageValues")
+    axes[1, 0].set_title("BounceRates vs. PageValues")
 
     # (d) Weekend × VisitorType
     wk_vt = df.groupby(["Weekend", "VisitorType"])["Revenue"].mean().unstack()
@@ -661,29 +727,28 @@ def plot_feature_interactions(
         ax=axes[1, 1],
         annot_kws={"size": 9},
     )
-    axes[1, 1].set_title("Purchase Rate (%) – Weekend × VisitorType")
+    axes[1, 1].set_title("Conversion Rate (%) – Weekend × VisitorType")
 
     plt.tight_layout()
-    _save_show(fig, "11_feature_interactions", save_dir, show)
+    _save_show(fig, "12_feature_interactions", save_dir, show)
 
 
 # ===================================================================
-# 13. Statistical Summary Table
+# 14. Statistical Summary Table & Hypothesis Testing
 # ===================================================================
 
 
-# Statistical summary (mean, median, std, skewness, kurtosis) by Revenue class
-# quantifies the distributional differences that justify preprocessing choices:
-# -> High skewness/kurtosis in continuous features -> supports outlier removal for KNN/SVM.
-# -> Mann-Whitney U p-values confirm which features are statistically significant
-#    predictors of Revenue — informing feature selection decisions.
 def print_statistical_summary(df: pd.DataFrame) -> None:
+    """
+    Compute descriptive statistical metrics and execute non-parametric hypothesis tests (Mann-Whitney U).
+    """
     print("\n" + "=" * 70)
-    print("13. STATISTICAL SUMMARY BY REVENUE")
+    print("14. STATISTICAL SUMMARY BY TARGET CLASS")
     print("=" * 70)
 
+    num_cols = [c for c in NUMERICAL_FEATURES if c in df.columns]
     summary_rows = []
-    for col in NUMERICAL_FEATURES:
+    for col in num_cols:
         for rev, lbl in zip([0, 1], ["No Purchase", "Purchase"]):
             s = df.loc[df["Revenue"] == rev, col]
             summary_rows.append(
@@ -701,9 +766,8 @@ def print_statistical_summary(df: pd.DataFrame) -> None:
     summary_df = pd.DataFrame(summary_rows)
     print(summary_df.to_string(index=False))
 
-    # Mann-Whitney U test for each numerical feature
-    print("\n  Mann-Whitney U test (Revenue 0 vs 1):")
-    for col in NUMERICAL_FEATURES:
+    print("\n  Mann-Whitney U Test Results (Revenue 0 vs 1):")
+    for col in num_cols:
         g0 = df.loc[df["Revenue"] == 0, col]
         g1 = df.loc[df["Revenue"] == 1, col]
         stat, pval = stats.mannwhitneyu(g0, g1, alternative="two-sided")
@@ -716,11 +780,14 @@ def print_statistical_summary(df: pd.DataFrame) -> None:
 
 
 # ===================================================================
-# 14. Key Findings Summary
+# 15. Key Findings Summary
 # ===================================================================
 
 
 def print_key_findings(df: pd.DataFrame) -> None:
+    """
+    Print high-level exploratory findings.
+    """
     rev_counts = df["Revenue"].value_counts()
     pv_zero_pct = (df["PageValues"] == 0).mean() * 100
     pv_pos_rate = df.loc[df["PageValues"] > 0, "Revenue"].mean() * 100
@@ -738,31 +805,24 @@ def print_key_findings(df: pd.DataFrame) -> None:
     wk_end = wk_rate[True] * 100
 
     print("\n" + "=" * 70)
-    print("14. KEY FINDINGS")
+    print("15. KEY FINDINGS SUMMARY")
     print("=" * 70)
     findings = [
-        f"- Dataset has {df.shape[0]:,} sessions, {df.shape[1]} features, "
-        f"no missing values.",
-        f"- Target is imbalanced: {rev_counts[0]:,} No vs {rev_counts[1]:,} Yes "
-        f"(ratio ~ {rev_counts[0] / rev_counts[1]:.1f}:1).",
-        f"- PageValues = 0 in {pv_zero_pct:.1f}% of sessions; "
-        f"purchase rate {pv_zero_rate:.2f}% vs {pv_pos_rate:.2f}% when > 0.",
-        f"- Best month: {best_month} ({month_rate[best_month] * 100:.1f}%), "
-        f"worst: {worst_month} ({month_rate[worst_month] * 100:.1f}%).",
-        f"- Best visitor type: {best_vt} "
-        f"({vt_rate[best_vt] * 100:.1f}% purchase rate).",
-        f"- Weekday rate: {wk_day:.2f}%, Weekend rate: {wk_end:.2f}%.",
-        "- PageValues is the strongest single predictor of Revenue.",
-        "- BounceRates and ExitRates are negatively correlated with Revenue.",
-        "- ProductRelated_Duration and PageValues show clear separation "
-        "between classes.",
+        f"- Dataset contains {df.shape[0]:,} sessions and {df.shape[1]} features.",
+        f"- Target variable is imbalanced: {rev_counts[0]:,} No Purchase vs. {rev_counts[1]:,} Purchase (ratio ~{rev_counts[0] / rev_counts[1]:.1f}:1).",
+        f"- PageValues = 0 in {pv_zero_pct:.1f}% of sessions; conversion rate is {pv_zero_rate:.2f}% when zero vs. {pv_pos_rate:.2f}% when > 0.",
+        f"- Highest conversion month: {best_month} ({month_rate[best_month] * 100:.1f}%), lowest: {worst_month} ({month_rate[worst_month] * 100:.1f}%).",
+        f"- Highest converting visitor segment: {best_vt} ({vt_rate[best_vt] * 100:.1f}% conversion rate).",
+        f"- Weekday conversion rate: {wk_day:.2f}%, Weekend conversion rate: {wk_end:.2f}%.",
+        "- Numerical features display significant positive skewness and long tails.",
+        "- Several ID-coded categorical features contain low-frequency categories (< 10 samples).",
     ]
     for f in findings:
         print(f"  {f}")
 
 
 # ===================================================================
-# Master: run_eda
+# Master Execution Pipeline
 # ===================================================================
 
 
@@ -772,28 +832,14 @@ def run_eda(
     show: bool = False,
 ) -> pd.DataFrame:
     """
-    Run the complete EDA pipeline.
-
-    Parameters
-    ----------
-    filepath : Path to the raw CSV.
-    save_dir : Directory for PNG plots (None to skip saving).
-    show     : Whether to call plt.show() interactively.
-
-    Returns
-    -------
-    The loaded DataFrame with Revenue encoded as int.
+    Execute complete EDA pipeline and export generated plots.
     """
-    # EDA is run on the RAW dataset (before any preprocessing steps).
-    # Revenue is temporarily encoded to int here for plotting purposes only
-    # (e.g., colour-coding plots by class). The actual encoding for model
-    # training is performed by encode_target() in data_preprocessing.py.
     p = Path(filepath)
     if not p.is_absolute():
         p = project_root / p
 
     df = pd.read_csv(p)
-    df["Revenue"] = df["Revenue"].astype(int)  # for visualisation only
+    df["Revenue"] = df["Revenue"].astype(int)
 
     print(f"\n[run_eda] Loaded {df.shape[0]:,} rows × {df.shape[1]} columns.\n")
 
@@ -802,6 +848,7 @@ def run_eda(
     plot_numerical_distributions(df, save_dir, show)
     plot_boxplots(df, save_dir, show)
     plot_categorical_distributions(df, save_dir, show)
+    plot_ordinal_rare_categories(df, save_dir, show)
     plot_correlation_heatmap(df, save_dir, show)
     plot_pagevalues_deep_dive(df, save_dir, show)
     plot_bounce_exit_analysis(df, save_dir, show)
@@ -812,7 +859,7 @@ def run_eda(
     print_statistical_summary(df)
     print_key_findings(df)
 
-    print(f"\n[run_eda] Plots saved to: {save_dir or '(not saved)'}")
+    print(f"\n[run_eda] All plots saved to: {save_dir or '(not saved)'}")
     return df
 
 

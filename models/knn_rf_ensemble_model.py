@@ -26,6 +26,7 @@ from src.utils import (
     generate_shap_explanation,
     print_metrics,
     save_model,
+    split_dataset,
 )
 
 
@@ -252,8 +253,11 @@ if __name__ == "__main__":
     # (e.g. "python models/knn_rf_ensemble_model.py"), not when it's
     # imported by another file like app.py.
 
-    # Load and prepare the dataset.
-    X_train, X_test, y_train, y_test, _ = preprocess_data(transform=False)
+    # Load data and split into train/test sets.
+    # preprocess_data() cleans the raw CSV (dedup, impute, group rare categories, etc.).
+    # split_dataset() performs the stratified train/test split (in utils.py).
+    df = preprocess_data()
+    X_train, X_test, y_train, y_test = split_dataset(df)
 
     # Train the model and save it to disk.
     model = train_knn_rf_ensemble(
