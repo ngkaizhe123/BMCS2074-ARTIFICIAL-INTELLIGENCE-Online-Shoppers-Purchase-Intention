@@ -523,9 +523,7 @@ def navigation_breadcrumb(current_page: str) -> None:
                 f'<span class="nav-crumb-active">{info["icon"]} {page_name}</span>'
             )
         else:
-            crumbs.append(
-                f'<span class="nav-crumb">{info["icon"]} {page_name}</span>'
-            )
+            crumbs.append(f'<span class="nav-crumb">{info["icon"]} {page_name}</span>')
 
     separator = ' <span class="nav-separator">›</span> '
     st.markdown(
@@ -598,9 +596,7 @@ def verdict_banner(will_purchase: bool, confidence_pct: float) -> None:
         )
 
 
-def multi_model_verdict_banner(
-    purchase_count: int, total_count: int
-) -> None:
+def multi_model_verdict_banner(purchase_count: int, total_count: int) -> None:
     """Verdict banner for Compare All Models mode.
     Shows Purchase / No Purchase / Mixed banner based on model consensus."""
     if purchase_count == total_count:

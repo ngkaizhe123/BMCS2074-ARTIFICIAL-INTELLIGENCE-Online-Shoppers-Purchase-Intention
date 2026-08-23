@@ -390,7 +390,7 @@ if submitted:
     # ── Advanced Loading Animation ──
     with st.spinner("🤖 AI is analyzing the session data..."):
         time.sleep(1.5)  # Add dramatic suspense for the prediction
-        
+
     warnings = []
     if product_related == 0 and product_related_duration > 0:
         warnings.append(
@@ -445,13 +445,13 @@ if submitted:
             confidence_pct = (
                 purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
             )
-            
+
             # Trigger Success/Failure animations based on prediction
             if prediction == 1:
                 st.balloons()
             else:
                 st.snow()
-                
+
             verdict_banner(bool(prediction == 1), confidence_pct)
 
             if proba is not None:
@@ -495,23 +495,27 @@ if submitted:
                         else None
                     )
                     pur_prob = float(prob[1]) if prob is not None else float(pred)
-                    all_results.append({
-                        "name": name,
-                        "icon": model_icon(info["stem"]),
-                        "pred": pred,
-                        "prob": prob,
-                        "pur_prob": pur_prob,
-                        "error": None,
-                    })
+                    all_results.append(
+                        {
+                            "name": name,
+                            "icon": model_icon(info["stem"]),
+                            "pred": pred,
+                            "prob": prob,
+                            "pur_prob": pur_prob,
+                            "error": None,
+                        }
+                    )
                 except Exception as e:
-                    all_results.append({
-                        "name": name,
-                        "icon": model_icon(info["stem"]),
-                        "pred": None,
-                        "prob": None,
-                        "pur_prob": None,
-                        "error": str(e),
-                    })
+                    all_results.append(
+                        {
+                            "name": name,
+                            "icon": model_icon(info["stem"]),
+                            "pred": None,
+                            "prob": None,
+                            "pur_prob": None,
+                            "error": str(e),
+                        }
+                    )
 
             # ── Determine consensus and trigger correct animation ────────
             valid_preds = [r["pred"] for r in all_results if r["pred"] is not None]
@@ -547,7 +551,9 @@ if submitted:
                         st.error("❌ No Purchase")
 
                     if result["prob"] is not None:
-                        st.caption(f"Purchase Probability: {result['pur_prob']*100:.1f}%")
+                        st.caption(
+                            f"Purchase Probability: {result['pur_prob']*100:.1f}%"
+                        )
                         probability_meter(result["pur_prob"])
                     else:
                         st.caption("No probability available")
