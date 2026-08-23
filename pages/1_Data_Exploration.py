@@ -15,11 +15,24 @@ from src.eda import (
     NUMERICAL_FEATURES,
     ORDINAL_FEATURES,
 )
-from src.ui_theme import apply_theme
+from src.ui_theme import apply_theme, navigation_breadcrumb, page_loading_animation
 
 # ── Page config ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="Data Exploration", page_icon="📊", layout="wide")
 apply_theme()
+
+# ── Page loading animation (only on first load) ─────────────────────────
+if "eda_loaded" not in st.session_state:
+    page_loading_animation(
+        "📊",
+        "Data Exploration",
+        "Loading dataset and computing statistics...",
+        duration=1.5,
+    )
+    st.session_state["eda_loaded"] = True
+
+# ── Navigation breadcrumb ────────────────────────────────────────────────
+navigation_breadcrumb("Data Exploration")
 
 st.title("📊 Data Exploration")
 st.caption(

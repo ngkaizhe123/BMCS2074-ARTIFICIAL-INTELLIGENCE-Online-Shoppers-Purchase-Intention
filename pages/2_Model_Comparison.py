@@ -9,8 +9,25 @@ import streamlit as st
 import pandas as pd
 import json
 
+from src.ui_theme import apply_theme, navigation_breadcrumb, page_loading_animation
+
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Model Comparison", page_icon="📈", layout="wide")
+apply_theme()
+
+# ── Page loading animation (only on first load) ─────────────────────────────
+if "mc_loaded" not in st.session_state:
+    page_loading_animation(
+        "📈",
+        "Model Comparison",
+        "Loading trained models and metrics...",
+        duration=1.2,
+    )
+    st.session_state["mc_loaded"] = True
+
+# ── Navigation breadcrumb ────────────────────────────────────────────────────
+navigation_breadcrumb("Model Comparison")
+
 st.title("📈 Model Comparison")
 st.markdown("---")
 
