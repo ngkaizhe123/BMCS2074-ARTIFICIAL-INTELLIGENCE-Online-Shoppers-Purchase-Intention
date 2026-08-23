@@ -83,6 +83,7 @@ from src.utils import (
     generate_shap_explanation,
     print_metrics,
     save_model,
+    split_dataset,
 )
 from scipy.stats import loguniform
 
@@ -652,9 +653,11 @@ def generate_svm_report(
 if __name__ == "__main__":
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
-    X_train, X_test, y_train, y_test, _ = preprocess_data(
-        filepath=data_path, transform=False
-    )
+    # Load data and split into train/test sets.
+    # preprocess_data() cleans the raw CSV (dedup, impute, group rare categories, etc.).
+    # split_dataset() performs the stratified train/test split (in utils.py).
+    df = preprocess_data(filepath=data_path)
+    X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Train & save ─────────────────────────────────────────────────────
     save_path = project_root / "saved_models" / "svm_model.pkl"

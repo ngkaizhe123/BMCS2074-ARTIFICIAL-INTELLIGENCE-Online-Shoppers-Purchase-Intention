@@ -56,10 +56,12 @@ def discover_models():
 def get_sample_pool():
     """Real test-set rows (features + true label), used by the
     'random real session' quick-fill button below."""
-    _, X_test, _, y_test, _ = preprocess_data(
+    df = preprocess_data(
         filepath=str(project_root / "data" / "raw" / "online_shoppers_intention.csv"),
-        transform=False,
     )
+    from src.utils import split_dataset
+
+    X_train, X_test, y_train, y_test = split_dataset(df)
     pool = X_test.copy()
     pool["Revenue"] = y_test.values
     return pool
@@ -399,14 +401,13 @@ if submitted:
                 "BounceRates": bounce_rates,
                 "ExitRates": exit_rates,
                 "PageValues": page_values,
-                "SpecialDay": special_day,
-                "Month": month,
-                "OperatingSystems": operating_system,
-                "Browser": browser,
-                "Region": region,
-                "TrafficType": traffic_type,
-                "VisitorType": visitor_type,
-                "Weekend": weekend,
+                "Month": str(month),
+                "OperatingSystems": str(operating_system),
+                "Browser": str(browser),
+                "Region": str(region),
+                "TrafficType": str(traffic_type),
+                "VisitorType": str(visitor_type),
+                "Weekend": bool(weekend),
             }
         ]
     )

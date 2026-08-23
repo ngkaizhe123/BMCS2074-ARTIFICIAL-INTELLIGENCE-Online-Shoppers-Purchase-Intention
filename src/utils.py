@@ -414,12 +414,11 @@ def generate_shap_explanation(
     figures["bar"] = fig_bar
 
     # Plot 3: Single Sample Waterfall Plot
-    fig_waterfall = plt.figure(figsize=(10, 6))
+    # shap.plots.waterfall() creates its own figure internally;
+    # use plt.gcf() to retrieve it after the call.
     shap.plots.waterfall(shap_values[0], max_display=min(10, max_display), show=False)
-    plt.title(
-        f"SHAP Waterfall Plot ({model_label} Sample #0)", fontsize=13, fontweight="bold"
-    )
-    plt.tight_layout()
+    fig_waterfall = plt.gcf()
+    fig_waterfall.set_size_inches(10, 6)
     _save_or_show(fig_waterfall, "shap_waterfall.png")
     figures["waterfall"] = fig_waterfall
 

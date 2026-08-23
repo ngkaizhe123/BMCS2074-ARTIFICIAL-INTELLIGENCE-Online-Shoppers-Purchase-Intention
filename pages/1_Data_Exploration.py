@@ -44,7 +44,8 @@ def load_data():
 def compute_stats(df: pd.DataFrame):
     """All the live numbers used across the sections below, computed once
     and cached — mirrors the calculations printed by src/eda.py."""
-    corr = df[NUMERICAL_FEATURES + ["Revenue"]].corr()
+    all_numeric = NUMERICAL_FEATURES + ORDINAL_FEATURES
+    corr = df[[c for c in all_numeric if c in df.columns] + ["Revenue"]].corr()
     top_corr = corr["Revenue"].drop("Revenue").sort_values(ascending=False)
 
     pv_zero_pct = (df["PageValues"] == 0).mean() * 100
@@ -199,15 +200,19 @@ st.header("3. Numerical Feature Distributions")
 chip("SKEW & SCALE")
 
 st.dataframe(df[NUMERICAL_FEATURES].describe().T.round(3), width="stretch")
-show_plot(
-    "02_numerical_distributions.png",
-    "Histograms by Revenue",
-    caption="Heavy right-skew and long tails across most features.",
-)
+
+# Show per-feature distribution plots in a 2-column grid
+dist_cols = st.columns(2)
+for idx, col in enumerate(NUMERICAL_FEATURES):
+    with dist_cols[idx % 2]:
+        show_plot(
+            f"02_dist_{col}.png",
+            f"{col} – Distribution",
+        )
+
 st.info(
-    "ℹ️ **What this means for preprocessing:** tree-based models (XGBoost) are "
-    "robust to this skew by design (`outlier_method='none'`), but distance-based "
-    "models (KNN, SVM) need `StandardScaler` (`scale_numerical=True`) to stop "
+    "ℹ️ Heavy right-skew and long tails are visible across most features. "
+    "Distance-based models (KNN, SVM) use `StandardScaler` to prevent "
     "large-magnitude features like `ProductRelated_Duration` from dominating "
     "the distance calculation."
 )
@@ -218,20 +223,22 @@ st.markdown("---")
 # 4. Box Plots (Outlier Inspection)
 # ═══════════════════════════════════════════════════════════════════════
 st.header("4. Box Plots — Outlier Inspection")
-chip("WHICH COLUMNS ARE SAFE TO OUTLIER-FILTER")
+chip("WHICH COLUMNS HAVE EXTREME OUTLIERS")
 
-show_plot(
-    "03_boxplots.png",
-    "Box Plots by Revenue",
-    caption="Administrative, Administrative_Duration, ProductRelated, "
-    "ProductRelated_Duration, BounceRates, and ExitRates show the clearest outliers.",
-)
+# Show per-feature boxplot in a 2-column grid
+box_cols = st.columns(2)
+for idx, col in enumerate(NUMERICAL_FEATURES):
+    with box_cols[idx % 2]:
+        show_plot(
+            f"03_boxplot_{col}.png",
+            f"{col} – Boxplot",
+        )
+
 st.warning(
-    "⚠️ **Why `Informational*`, `PageValues`, and `SpecialDay` are excluded from "
-    "outlier removal:** all three are zero-inflated — their IQR is 0. Running IQR "
-    "filtering on them would flag almost every non-zero value as an outlier, "
-    "deleting the majority of purchasing sessions in the process. Only the 6 "
-    "columns above are used for IQR/Z-score removal."
+    "⚠️ **Why `Informational*` and `PageValues` are excluded from outlier removal:** "
+    "both are zero-inflated — their IQR is 0. Running IQR filtering on them would flag "
+    "almost every non-zero value as an outlier, deleting the majority of purchasing "
+    "sessions in the process."
 )
 
 st.markdown("---")
@@ -245,25 +252,46 @@ chip("ENCODING STRATEGY")
 st.markdown(
     "**Nominal categories** (`Month`, `VisitorType`, `Weekend`) — one-hot encoded.\n\n"
     "**Integer-coded IDs** (`OperatingSystems`, `Browser`, `Region`, `TrafficType`) "
-    "— treated as numerical (passthrough for XGBoost, scaled for KNN/SVM), *not* "
-    "one-hot encoded, since they're high-cardinality IDs rather than a handful of "
-    "nominal labels."
+    "— treated as categorical and one-hot encoded after rare categories are merged. "
+    "Their category counts are inspected in Section 6."
 )
 
 show_plot(
-    "04_categorical_distributions.png",
-    "Purchase Rate by Category (all 7 fields)",
+    "04_categorical_purchase_rate.png",
+    "Conversion Rate by Category",
 )
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 6. Correlation Heatmap
+# 6. Low-Count Category Inspection
 # ═══════════════════════════════════════════════════════════════════════
-st.header("6. Correlation Heatmap")
+st.header("6. Low-Frequency Category Inspection")
+chip("RARE CATEGORIES IN ID-CODED FEATURES")
+
+st.markdown(
+    "Several ID-coded features contain categories with fewer than **10 samples**. "
+    "These low-frequency categories are highlighted in red below."
+)
+
+# Show per-feature count plots in a 2-column grid
+rare_cols = st.columns(2)
+for idx, col in enumerate(ORDINAL_FEATURES):
+    with rare_cols[idx % 2]:
+        show_plot(
+            f"05_count_{col}.png",
+            f"{col} – Category Frequency",
+        )
+
+st.markdown("---")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. Correlation Heatmap
+# ═══════════════════════════════════════════════════════════════════════
+st.header("7. Correlation Heatmap")
 chip("WHAT DRIVES REVENUE")
 
-show_plot("05_correlation_heatmap.png", "Correlation Heatmap")
+show_plot("06_correlation_heatmap.png", "Feature Correlation Matrix")
 
 st.subheader("Top correlations with Revenue")
 top_corr_df = stats_["top_corr"].head(5).reset_index()
@@ -281,9 +309,9 @@ st.info(
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 7. PageValues Deep-Dive
+# 8. PageValues Deep-Dive
 # ═══════════════════════════════════════════════════════════════════════
-st.header("7. PageValues Deep-Dive")
+st.header("8. PageValues Deep-Dive")
 chip("THE SINGLE STRONGEST PREDICTOR")
 
 p1, p2, p3 = st.columns(3)
@@ -294,8 +322,8 @@ p3.metric(
 )
 
 show_plot(
-    "06_pagevalues_deep_dive.png",
-    "PageValues — 4-panel Deep-Dive",
+    "07_pagevalues_deep_dive.png",
+    "PageValues — 4-panel Analysis",
     caption="Violin distribution, zero-inflation breakdown, non-zero histogram, and PageValues vs ExitRates.",
 )
 st.success(
@@ -308,25 +336,23 @@ st.success(
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 8. BounceRates / ExitRates Analysis
+# 9. BounceRates / ExitRates Analysis
 # ═══════════════════════════════════════════════════════════════════════
-st.header("8. BounceRates / ExitRates Analysis")
+st.header("9. BounceRates / ExitRates Analysis")
 chip(f"CORRELATED AT r = {stats_['be_corr']:.2f}")
 
-show_plot("07_bounce_exit_analysis.png", "BounceRates & ExitRates")
+show_plot("08_bounce_exit_analysis.png", "BounceRates & ExitRates")
 st.info(
-    "ℹ️ Both are included in `CONTINUOUS_FEATURES_FOR_OUTLIERS` for KNN/SVM "
-    "pipelines (`outlier_method='iqr'` or `'zscore'`) — their high mutual "
-    "correlation means they carry overlapping but not identical signal, so "
-    "both are kept rather than dropping one."
+    "ℹ️ Both BounceRates and ExitRates show a strong mutual correlation. "
+    "Both are retained as they carry overlapping but complementary signal."
 )
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 9. Monthly Purchase Rate
+# 10. Monthly Purchase Rate
 # ═══════════════════════════════════════════════════════════════════════
-st.header("9. Monthly Purchase Rate")
+st.header("10. Monthly Purchase Rate")
 chip("SEASONALITY")
 
 mo1, mo2 = st.columns(2)
@@ -341,53 +367,53 @@ mo2.metric(
     f"{stats_['month_rate'][stats_['worst_month']] * 100:.1f}% purchase rate",
     delta_color="inverse",
 )
-show_plot("08_monthly_purchase_rate.png", "Monthly Sessions & Purchase Rate")
+show_plot("09_monthly_purchase_rate.png", "Monthly Sessions & Conversion Rate")
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 10. Visitor Type Analysis
+# 11. Visitor Type Analysis
 # ═══════════════════════════════════════════════════════════════════════
-st.header("10. Visitor Type Analysis")
+st.header("11. Visitor Type Analysis")
 chip("NEW VS RETURNING")
 
 vt_cols = st.columns(len(stats_["vt_rate"]))
 for col, (vt_name, rate) in zip(vt_cols, stats_["vt_rate"].items()):
     col.metric(vt_name, f"{rate * 100:.1f}%")
-show_plot("09_visitor_type.png", "Sessions, Purchases & Rate by Visitor Type")
+show_plot("10_visitor_type_analysis.png", "Sessions, Purchases & Rate by Visitor Type")
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 11. Weekend Effect
+# 12. Weekend Effect
 # ═══════════════════════════════════════════════════════════════════════
-st.header("11. Weekend Effect")
+st.header("12. Weekend Effect")
 chip("WEEKDAY VS WEEKEND")
 
 w1, w2 = st.columns(2)
 w1.metric("Weekday purchase rate", f"{stats_['wk_rate'][False] * 100:.2f}%")
 w2.metric("Weekend purchase rate", f"{stats_['wk_rate'][True] * 100:.2f}%")
-show_plot("10_weekend_effect.png", "Purchase Rate – Weekday vs Weekend")
+show_plot("11_weekend_effect.png", "Conversion Rate – Weekday vs Weekend")
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 12. Feature Interaction Analysis
+# 13. Feature Interaction Analysis
 # ═══════════════════════════════════════════════════════════════════════
-st.header("12. Feature Interaction Analysis")
+st.header("13. Feature Interaction Analysis")
 chip("COMBINED EFFECTS")
 
 show_plot(
-    "11_feature_interactions.png",
+    "12_feature_interactions.png",
     "Duration×PageValues, Month×VisitorType, BounceRates×PageValues, Weekend×VisitorType",
 )
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 13. Statistical Summary Table
+# 14. Statistical Summary Table
 # ═══════════════════════════════════════════════════════════════════════
-st.header("13. Statistical Summary Table")
+st.header("14. Statistical Summary Table")
 chip("MEAN · MEDIAN · SKEW · KURTOSIS · SIGNIFICANCE")
 
 with st.expander("📐 Full summary (mean / median / std / skew / kurtosis by Revenue)"):
@@ -401,16 +427,16 @@ mw_display["p-value"] = mw_display["p-value"].apply(lambda v: f"{v:.2e}")
 st.dataframe(mw_display, width="stretch")
 st.caption(
     "`***` p<0.001, `**` p<0.01, `*` p<0.05, `ns` not significant. "
-    "All 10 numerical features differ significantly between Purchase and "
+    "All numerical features differ significantly between Purchase and "
     "No-Purchase sessions — none are dropped on statistical grounds."
 )
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════
-# 14. Key Findings Summary
+# 15. Key Findings Summary
 # ═══════════════════════════════════════════════════════════════════════
-st.header("14. Key Findings")
+st.header("15. Key Findings")
 chip("TL;DR")
 
 findings = [
@@ -425,6 +451,7 @@ findings = [
     "**PageValues is the strongest single predictor of Revenue.**",
     "BounceRates and ExitRates are negatively correlated with Revenue.",
     "ProductRelated_Duration and PageValues show clear separation between classes.",
+    "Several ID-coded features (OperatingSystems, Browser, Region, TrafficType) contain low-frequency categories (< 10 samples).",
 ]
 st.markdown(
     '<div class="app-card">' + "".join(f"<p>• {f}</p>" for f in findings) + "</div>",
