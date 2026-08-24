@@ -49,7 +49,7 @@ SAVED_DIR = project_root / "saved_models"
 
 
 # ── Auto-detect saved models ────────────────────────────────────────────
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading models...")
 def discover_models():
     """Scan saved_models/ for .pkl model files."""
     models = {}
@@ -144,7 +144,6 @@ DEFAULT_EXAMPLE = {
     "bounce_rates": 0.02,
     "exit_rates": 0.05,
     "page_values": 0.0,
-    "special_day": 0.0,
     "month": "Feb",
     "operating_system": 2,
     "browser": 2,
@@ -166,7 +165,6 @@ HIGH_INTENT_EXAMPLE = {
     "bounce_rates": 0.001,
     "exit_rates": 0.01,
     "page_values": 35.0,
-    "special_day": 0.0,
     "month": "Nov",
     "operating_system": 2,
     "browser": 2,
@@ -186,7 +184,6 @@ LOW_INTENT_EXAMPLE = {
     "bounce_rates": 0.2,
     "exit_rates": 0.2,
     "page_values": 0.0,
-    "special_day": 0.0,
     "month": "May",
     "operating_system": 2,
     "browser": 2,
@@ -221,7 +218,6 @@ def load_random_real_session() -> None:
         "bounce_rates": float(row["BounceRates"]),
         "exit_rates": float(row["ExitRates"]),
         "page_values": float(row["PageValues"]),
-        "special_day": float(row["SpecialDay"]),
         "month": str(row["Month"]),
         "operating_system": int(row["OperatingSystems"]),
         "browser": int(row["Browser"]),
@@ -344,14 +340,6 @@ with st.form("prediction_form"):
                 key="page_values",
                 help="⭐ The strongest predictor in this dataset — the average value "
                 "(from Google Analytics) of the pages visited before a purchase.",
-            )
-            special_day = st.slider(
-                "Proximity to a special day",
-                0.0,
-                1.0,
-                step=0.2,
-                key="special_day",
-                help="0 = far from a special day (e.g. Valentine's, Mother's Day), 1 = the day itself.",
             )
 
     with tab3:
