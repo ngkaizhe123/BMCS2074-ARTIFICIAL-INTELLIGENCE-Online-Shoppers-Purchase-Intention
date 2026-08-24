@@ -107,6 +107,8 @@ from src.utils import (
 
 
 class HybridKernelSVC(BaseEstimator, ClassifierMixin):
+    __module__ = "models.mkl_svm"
+
     """SVM classifier with a convex combination of linear and RBF kernels.
 
     The combined kernel is defined as::

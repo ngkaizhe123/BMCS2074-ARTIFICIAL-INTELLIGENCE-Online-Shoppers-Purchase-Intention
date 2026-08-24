@@ -11,6 +11,7 @@ import streamlit as st
 import time
 
 from src.data_preprocessing import preprocess_data
+from src.utils import load_model
 from src.ui_theme import (
     apply_theme,
     confidence_label,
@@ -60,7 +61,7 @@ def discover_models():
             if any(s in stem for s in skip_names):
                 continue
             try:
-                model = joblib.load(pkl)
+                model = load_model(pkl)
                 nice_name = pkl.stem.replace("_", " ").title()
                 models[nice_name] = {"model": model, "stem": pkl.stem}
             except Exception as e:

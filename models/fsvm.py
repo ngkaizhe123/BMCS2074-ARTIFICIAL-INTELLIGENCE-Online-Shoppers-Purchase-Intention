@@ -223,6 +223,8 @@ def compute_class_costs(
 
 
 class FuzzySVM(BaseEstimator, ClassifierMixin):
+    __module__ = "models.fsvm"
+
     """Asymmetric Fuzzy SVM classifier (Lin & Wang, 2002 style).
 
     This estimator wraps ``sklearn.svm.SVC(kernel="rbf")`` and injects
