@@ -142,7 +142,7 @@ online_shoppers_purchase_prediction/
 │   ├── 2_📈_Model_Comparison.py
 │   └── 3_🔮_Purchase_Prediction.py
 │
-├── main.py
+├── app.py
 ├── requirements.txt
 └── README.md
 ```
