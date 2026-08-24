@@ -20,22 +20,23 @@
   },
   "Svm Model": {
     "stem": "svm",
-    "Accuracy": 0.8889799262597297,
-    "Precision": 0.7047970479704797,
-    "Recall": 0.5,
-    "F1 Score": 0.5849923430321593,
-    "AUC": 0.894202187306907,
+    "Accuracy": 0.88529291274068,
+    "Precision": 0.6902985074626866,
+    "Recall": 0.48429319371727747,
+    "F1": 0.5692307692307692,
+    "AUC": 0.89333891051672,
     "Confusion Matrix": [
       [
-        1979,
-        80
+        1976,
+        83
       ],
       [
-        191,
-        191
+        197,
+        185
       ]
     ],
-    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.91      0.96      0.94      2059\n           1       0.70      0.50      0.58       382\n\n    accuracy                           0.89      2441\n   macro avg       0.81      0.73      0.76      2441\nweighted avg       0.88      0.89      0.88      2441\n"
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.91      0.96      0.93      2059\n           1       0.69      0.48      0.57       382\n\n    accuracy                           0.89      2441\n   macro avg       0.80      0.72      0.75      2441\nweighted avg       0.88      0.89      0.88      2441\n",
+    "F1 Score": 0.5692307692307692
   },
   "Xgboost Pso": {
     "stem": "xgboost",

@@ -671,7 +671,7 @@ if __name__ == "__main__":
 
     # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
-    print_metrics("SVM Classifier", metrics)
+    print_metrics("Svm Model", metrics)
 
     # ── 3.5 Save metrics to report_assets/metrics.json ──────────────────────
     metrics_output_path = project_root / "report_assets" / "metrics.json"
