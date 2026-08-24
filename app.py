@@ -7,6 +7,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import streamlit as st
+from src.ui_theme import apply_theme, navigation_breadcrumb, page_loading_animation
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
@@ -15,6 +16,20 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+apply_theme()
+
+# ── Page loading animation (only on first load) ─────────────────────────────
+if "home_loaded" not in st.session_state:
+    page_loading_animation(
+        "🛍️",
+        "Welcome to Online Shopper Purchase Intention",
+        "Initializing the system...",
+        duration=1.5,
+    )
+    st.session_state["home_loaded"] = True
+
+# ── Navigation breadcrumb ────────────────────────────────────────────────────
+navigation_breadcrumb("Home")
 
 # ── Main landing page ──────────────────────────────────────────────────────
 st.title("🛍️ Online Shopper Purchase Intention System")

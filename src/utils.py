@@ -142,12 +142,22 @@ def plot_roc_curve(model, X_test, y_test):
     return plt.gcf()
 
 
-def save_model(model, output_path: str | Path) -> None:
-    """Save trained model/pipeline to file, creating parent directories if needed."""
+def save_model(model, output_path: str | Path, compress: int = 3) -> None:
+    """Save trained model/pipeline to file, creating parent directories if needed.
+
+    Args:
+        model: The trained model or pipeline to save.
+        output_path: Destination file path for the .pkl file.
+        compress: joblib compression level 0-9 (0 = none, 3 = good balance of
+            size vs speed, 9 = maximum compression). Defaults to 3, which
+            typically reduces file size by 3-5x with negligible load overhead.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, path)
-    print(f"[save_model] Model saved successfully to {path.resolve()}")
+    joblib.dump(model, path, compress=compress)
+    print(
+        f"[save_model] Model saved successfully to {path.resolve()} (compress={compress})"
+    )
 
 
 def load_model(filepath: str | Path):
@@ -404,12 +414,11 @@ def generate_shap_explanation(
     figures["bar"] = fig_bar
 
     # Plot 3: Single Sample Waterfall Plot
-    fig_waterfall = plt.figure(figsize=(10, 6))
+    # shap.plots.waterfall() creates its own figure internally;
+    # use plt.gcf() to retrieve it after the call.
     shap.plots.waterfall(shap_values[0], max_display=min(10, max_display), show=False)
-    plt.title(
-        f"SHAP Waterfall Plot ({model_label} Sample #0)", fontsize=13, fontweight="bold"
-    )
-    plt.tight_layout()
+    fig_waterfall = plt.gcf()
+    fig_waterfall.set_size_inches(10, 6)
     _save_or_show(fig_waterfall, "shap_waterfall.png")
     figures["waterfall"] = fig_waterfall
 
