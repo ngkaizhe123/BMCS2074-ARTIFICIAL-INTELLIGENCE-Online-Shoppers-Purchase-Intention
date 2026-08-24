@@ -240,11 +240,11 @@ if __name__ == "__main__":
 
     # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
-    print_metrics("SVM Classifier", metrics)
+    print_metrics("SVM Model", metrics)
 
     # ── 4. Persist metrics ──────────────────────────────────────────────────
     metrics_output_path = project_root / "report_assets" / "metrics.json"
-    save_metrics("SVM Classifier", "svm", metrics, metrics_output_path)
+    save_metrics("SVM Model", "svm", metrics, metrics_output_path)
 
     # ── 5. SHAP Interpretability ────────────────────────────────────────────
     print("\n[SHAP] Generating SVM SHAP explanation plots...")
