@@ -97,6 +97,7 @@ from src.utils import (
     evaluate_model,
     print_metrics,
     save_model,
+    split_dataset,
 )
 
 # ============================================================================
@@ -470,9 +471,8 @@ if __name__ == "__main__":
 
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
-    X_train, X_test, y_train, y_test, _ = preprocess_data(
-        filepath=data_path, transform=False
-    )
+    df = preprocess_data(filepath=data_path)
+    X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Best C / gamma from svm_model.py's RandomizedSearchCV ───────────
     # Paste the values printed by svm_model.py's "[train_svm] Best SVM
