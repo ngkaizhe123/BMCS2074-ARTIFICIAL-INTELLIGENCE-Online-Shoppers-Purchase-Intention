@@ -1,4 +1,4 @@
-from .fsvm import FuzzySVM
+from .fsvm import FuzzySVM, train_fsvm
 from .knn_rf_ensemble_model import train_knn_rf_ensemble
 from .svm_model import train_svm
 from .xgboost_model import train_xgboost
@@ -7,6 +7,7 @@ train_knn = train_knn_rf_ensemble
 
 __all__ = [
     "FuzzySVM",
+    "train_fsvm",
     "train_knn",
     "train_knn_rf_ensemble",
     "train_svm",
