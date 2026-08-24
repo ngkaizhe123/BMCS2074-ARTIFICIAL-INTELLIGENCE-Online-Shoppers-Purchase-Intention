@@ -209,11 +209,8 @@ def load_model(filepath: str | Path):
         main_mod = sys.modules.get("__main__")
         if main_mod is not None:
             from models.fsvm import FuzzySVM
-            from models.mkl_svm import HybridKernelSVC
             if not hasattr(main_mod, "FuzzySVM"):
                 setattr(main_mod, "FuzzySVM", FuzzySVM)
-            if not hasattr(main_mod, "HybridKernelSVC"):
-                setattr(main_mod, "HybridKernelSVC", HybridKernelSVC)
     except Exception:
         pass
 

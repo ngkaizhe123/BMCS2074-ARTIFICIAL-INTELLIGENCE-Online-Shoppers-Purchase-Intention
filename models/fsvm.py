@@ -48,7 +48,7 @@ Probability calibration
 ``SVC`` is created **without** the deprecated ``probability`` parameter
 (sklearn ≥ 1.9).  Probabilities are obtained by wrapping the fitted
 model in ``CalibratedClassifierCV(ensemble=False)``, identical to the
-approach used in ``svm_model.py`` and ``mkl_svm.py``.
+approach used in ``svm_model.py``.
 
 Hyperparameters
 ---------------
