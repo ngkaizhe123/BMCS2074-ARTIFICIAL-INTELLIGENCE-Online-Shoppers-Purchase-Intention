@@ -25,6 +25,7 @@ if str(project_root) not in sys.path:
 from src.data_preprocessing import preprocess_data
 from src.utils import (
     evaluate_model,
+    load_model,
     plot_confusion_matrix,
     plot_roc_curve,
     split_dataset,
@@ -74,7 +75,7 @@ def main():
     for name, info in models.items():
         print(f"    -> Evaluating {name}...")
         try:
-            model = joblib.load(info["path"])
+            model = load_model(info["path"])
             metrics = evaluate_model(model, X_test, y_test)
 
             cm = metrics["Confusion Matrix"]

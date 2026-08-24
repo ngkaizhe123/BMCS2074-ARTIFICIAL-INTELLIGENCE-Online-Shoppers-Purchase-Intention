@@ -57,17 +57,25 @@ results = []
 detail_metrics = {}
 
 for name, metrics in all_metrics.items():
+    if isinstance(metrics, list):
+        metrics = metrics[-1] if len(metrics) > 0 else {}
+    if not isinstance(metrics, dict):
+        continue
+
     results.append(
         {
             "Model": name,
-            "Accuracy": metrics["Accuracy"],
-            "Precision": metrics["Precision"],
-            "Recall": metrics["Recall"],
-            "F1 Score": metrics["F1 Score"],
-            "AUC": metrics["AUC"] if metrics["AUC"] is not None else "N/A",
+            "Accuracy": metrics.get("Accuracy", 0.0),
+            "Precision": metrics.get("Precision", 0.0),
+            "Recall": metrics.get("Recall", 0.0),
+            "F1 Score": metrics.get("F1 Score", metrics.get("F1", 0.0)),
+            "AUC": metrics.get("AUC") if metrics.get("AUC") is not None else "N/A",
         }
     )
-    detail_metrics[name] = {"metrics": metrics, "stem": metrics["stem"]}
+    detail_metrics[name] = {
+        "metrics": metrics,
+        "stem": metrics.get("stem", name.lower().split()[0]),
+    }
 
 # ── Summary Table ──────────────────────────────────────────────────────────
 # ── Summary Table ──────────────────────────────────────────────────────────

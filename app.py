@@ -7,6 +7,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import streamlit as st
+from models import FuzzySVM
 from src.ui_theme import apply_theme, navigation_breadcrumb, page_loading_animation
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
