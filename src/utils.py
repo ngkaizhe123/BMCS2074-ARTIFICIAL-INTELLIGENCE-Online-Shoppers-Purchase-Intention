@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -107,6 +108,41 @@ def print_metrics(model_name: str, metrics: dict) -> None:
 
     print("\nClassification Report:")
     print(metrics["Classification Report"])
+
+
+def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
+    """Persist a model's metrics dict to the shared metrics.json file."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Convert non-serializable objects (like numpy arrays)
+    serializable_metrics = {"stem": stem}
+    for k, v in metrics.items():
+        if isinstance(v, np.ndarray):
+            serializable_metrics[k] = v.tolist()
+        else:
+            serializable_metrics[k] = v
+
+    # Ensure both "F1" and "F1 Score" keys exist for compatibility
+    if "F1" in metrics and "F1 Score" not in serializable_metrics:
+        serializable_metrics["F1 Score"] = metrics["F1"]
+    elif "F1 Score" in metrics and "F1" not in serializable_metrics:
+        serializable_metrics["F1"] = metrics["F1 Score"]
+
+    if output_path.exists():
+        try:
+            with open(output_path, "r") as f:
+                all_metrics = json.load(f)
+        except json.JSONDecodeError:
+            all_metrics = {}
+    else:
+        all_metrics = {}
+
+    all_metrics[model_name] = serializable_metrics
+
+    with open(output_path, "w") as f:
+        json.dump(all_metrics, f, indent=2)
+
+    print(f"Metrics for {model_name} saved to {output_path}")
 
 
 def plot_confusion_matrix(model, X_test, y_test):

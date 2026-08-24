@@ -96,6 +96,7 @@ from src.data_preprocessing import (
 from src.utils import (
     evaluate_model,
     print_metrics,
+    save_metrics,
     save_model,
     split_dataset,
 )
@@ -524,3 +525,7 @@ if __name__ == "__main__":
     # ── 7. Save model ──────────────────────────────────────────────────────
     save_path = project_root / "saved_models" / "svm_mkl.pkl"
     save_model(calibrated_model, save_path)
+
+    # ── 8. Save metrics to metrics.json ─────────────────────────────────────
+    metrics_output_path = project_root / "report_assets" / "metrics.json"
+    save_metrics("MKL-SVM (Hybrid Kernel)", "mkl_svm", metrics, metrics_output_path)

@@ -82,6 +82,7 @@ from src.utils import (
     evaluate_model,
     generate_shap_explanation,
     print_metrics,
+    save_metrics,
     save_model,
     split_dataset,
 )
@@ -671,6 +672,10 @@ if __name__ == "__main__":
     # ── 3. Core metrics ─────────────────────────────────────────────────────
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("SVM Classifier", metrics)
+
+    # ── 3.5 Save metrics to report_assets/metrics.json ──────────────────────
+    metrics_output_path = project_root / "report_assets" / "metrics.json"
+    save_metrics("SVM Classifier", "svm", metrics, metrics_output_path)
 
     # ── 4. Full SVM report (confusion matrix, ROC, PR curve, heatmap, …) ───
     PLOT_DIR = str(project_root / "report_assets" / "plots")

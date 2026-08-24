@@ -103,6 +103,7 @@ from src.data_preprocessing import (
 from src.utils import (
     evaluate_model,
     print_metrics,
+    save_metrics,
     save_model,
     split_dataset,
 )
@@ -506,7 +507,11 @@ if __name__ == "__main__":
     save_path = project_root / "saved_models" / "svm_fsvm.pkl"
     save_model(calibrated_model, save_path)
 
-    # ── 8. Print training duration ──────────────────────────────────────────
+    # ── 8. Save metrics to metrics.json ─────────────────────────────────────
+    metrics_output_path = project_root / "report_assets" / "metrics.json"
+    save_metrics("Asymmetric Fuzzy SVM (FSVM)", "fsvm", metrics, metrics_output_path)
+
+    # ── 9. Print training duration ──────────────────────────────────────────
     print("\n" + "=" * 70)
     print(f" FSVM Training Duration: {train_duration:.2f} seconds")
     print("=" * 70)
