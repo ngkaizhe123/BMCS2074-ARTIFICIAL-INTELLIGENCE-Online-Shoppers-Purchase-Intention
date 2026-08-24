@@ -532,10 +532,10 @@ if submitted:
                         st.error("❌ No Purchase")
 
                     if result["prob"] is not None:
-                        st.caption(
-                            f"Purchase Probability: {result['pur_prob']*100:.1f}%"
-                        )
                         probability_meter(result["pur_prob"])
+                        st.metric("No Purchase prob.", f"{result['prob'][0] * 100:.1f}%")
+                        st.metric("Purchase prob.", f"{result['prob'][1] * 100:.1f}%")
+                        st.metric("Confidence", confidence_label(result["pur_prob"]))
                     else:
                         st.caption("No probability available")
 
