@@ -206,9 +206,11 @@ def load_model(filepath: str | Path):
     # to support models saved when a script was executed directly as __main__
     try:
         import sys
+
         main_mod = sys.modules.get("__main__")
         if main_mod is not None:
             from models.fsvm import FuzzySVM
+
             if not hasattr(main_mod, "FuzzySVM"):
                 setattr(main_mod, "FuzzySVM", FuzzySVM)
     except Exception:
