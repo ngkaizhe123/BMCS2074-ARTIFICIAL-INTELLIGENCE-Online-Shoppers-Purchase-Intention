@@ -81,7 +81,6 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
 
-
 # ============================================================================
 # Project root
 # ============================================================================
@@ -106,7 +105,6 @@ from src.utils import (
     print_metrics,
     save_model,
 )
-
 
 # ============================================================================
 # FUZZY MEMBERSHIP COMPUTATION
@@ -310,12 +308,15 @@ class FuzzySVM(BaseEstimator, ClassifierMixin):
 
         # ── 1. Fuzzy membership ────────────────────────────────────────
         self.fuzzy_membership_ = compute_fuzzy_membership(
-            X, y, eps=self.eps,
+            X,
+            y,
+            eps=self.eps,
         )
 
         # ── 2. Asymmetric class cost ───────────────────────────────────
         class_costs = compute_class_costs(
-            y, cost_ratio=self.cost_ratio,
+            y,
+            cost_ratio=self.cost_ratio,
         )
 
         # ── 3. Combined sample weight ─────────────────────────────────
@@ -432,7 +433,8 @@ if __name__ == "__main__":
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = project_root / "data" / "raw" / "online_shoppers_intention.csv"
     X_train, X_test, y_train, y_test, _ = preprocess_data(
-        filepath=data_path, transform=False,
+        filepath=data_path,
+        transform=False,
     )
 
     # ── 2. Best C / gamma from svm_model.py's RandomizedSearchCV ───────────

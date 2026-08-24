@@ -99,7 +99,6 @@ from src.utils import (
     save_model,
 )
 
-
 # ============================================================================
 # HYBRID KERNEL SVC ESTIMATOR
 # ============================================================================
@@ -444,16 +443,20 @@ def tune_mkl_lambda(
                 f"mean PR-AUC = {mean_prauc:.4f} ± {std_prauc:.4f}"
             )
 
-    results_df = pd.DataFrame(rows).sort_values(
-        "mean_pr_auc", ascending=False
-    ).reset_index(drop=True)
+    results_df = (
+        pd.DataFrame(rows)
+        .sort_values("mean_pr_auc", ascending=False)
+        .reset_index(drop=True)
+    )
 
     best_lam = float(results_df.iloc[0]["lam"])
 
     if verbose:
         print("-" * 70)
-        print(f"  ✓ Best lam = {best_lam:.2f}  "
-              f"(mean PR-AUC = {results_df.iloc[0]['mean_pr_auc']:.4f})")
+        print(
+            f"  ✓ Best lam = {best_lam:.2f}  "
+            f"(mean PR-AUC = {results_df.iloc[0]['mean_pr_auc']:.4f})"
+        )
         print("=" * 70)
 
     return best_lam, results_df
