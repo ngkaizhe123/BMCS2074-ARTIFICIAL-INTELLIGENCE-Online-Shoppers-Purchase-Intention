@@ -61,6 +61,7 @@ NUMERICAL_FEATURES = [
     "BounceRates",
     "ExitRates",
     "PageValues",
+    "SpecialDay",
 ]
 
 CATEGORICAL_FEATURES = ["Month", "VisitorType", "Weekend"]
