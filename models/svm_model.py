@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parent.parent
@@ -75,9 +76,11 @@ from sklearn.model_selection import (
     cross_validate,
     learning_curve,
 )
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.metrics.pairwise import linear_kernel, rbf_kernel
 from sklearn.svm import SVC
 
-from src.data_preprocessing import build_preprocessor, preprocess_data
+from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
 from src.utils import (
     evaluate_model,
     generate_shap_explanation,
@@ -646,6 +649,451 @@ def generate_svm_report(
 
 
 # ---------------------------------------------------------------------------
+# 7. Hybrid-Kernel SVM (Linear + RBF blend via precomputed Gram matrix)
+# ---------------------------------------------------------------------------
+# Why a hybrid kernel?
+# --------------------
+# A pure linear kernel captures globally linear structure; a pure RBF kernel
+# captures local non-linear patterns.  In practice, many real-world datasets
+# (including e-commerce browsing data) have both kinds of signal.  By blending
+# the two kernels with a mixing coefficient ``lam``, the model can interpolate
+# between the two regimes and often outperforms either pure kernel alone.
+#
+# The mixing coefficient ``lam`` is treated as a hyperparameter and optimised
+# alongside C and gamma via Particle Swarm Optimization (PSO), keeping the
+# entire enhancement strictly within the SVM algorithm — no ensembling with
+# other model families.
+# ---------------------------------------------------------------------------
+
+
+class HybridKernelSVC(BaseEstimator, ClassifierMixin):
+    """Hybrid-kernel SVM blending linear and RBF Gram matrices.
+
+    Kernel formula
+    --------------
+    K(x, x') = lam · K_linear(x, x') + (1 − lam) · K_rbf(x, x'; gamma)
+
+    Boundary cases
+    --------------
+    - lam = 1  → pure linear kernel
+    - lam = 0  → pure RBF kernel
+    - 0 < lam < 1  → blended kernel, producing a decision boundary
+      distinct from either pure kernel
+
+    The blended Gram matrix is fed to ``SVC(kernel="precomputed")``.
+
+    Cost trade-off (report limitation)
+    -----------------------------------
+    Because ``kernel="precomputed"`` requires the full training Gram matrix,
+    the fitted model stores the entire training set (``self.X_train_``).
+    Prediction cost therefore scales as O(n_train × n_predict) — i.e. with
+    the full training-set size, not just the number of support vectors as in
+    a standard SVC.  For the ~10 k-row Online Shoppers dataset this is
+    acceptable, but it would become prohibitive on datasets with >100 k
+    training samples.  This should be called out in the report's Limitations
+    section.
+
+    Parameters
+    ----------
+    C : float
+        SVM regularisation parameter.
+    gamma : float
+        RBF kernel bandwidth parameter.
+    lam : float
+        Kernel mixing coefficient (0 = pure RBF, 1 = pure linear).
+    random_state : int
+        Seed for reproducibility (passed to the inner SVC).
+    """
+
+    def __init__(
+        self,
+        C: float = 1.0,
+        gamma: float = 0.1,
+        lam: float = 0.5,
+        random_state: int = 42,
+    ) -> None:
+        self.C = C
+        self.gamma = gamma
+        self.lam = lam
+        self.random_state = random_state
+
+    # -- Gram matrix computation ---------------------------------------------
+
+    def _compute_gram(self, X: np.ndarray, Y: np.ndarray | None = None) -> np.ndarray:
+        """Compute the blended (linear + RBF) kernel matrix.
+
+        When ``Y is None`` the symmetric training Gram matrix K(X, X) is
+        returned; otherwise the rectangular test Gram matrix K(X, Y) is
+        returned (rows = test samples, columns = training samples).
+        """
+        K_lin = linear_kernel(X, Y)
+        K_rbf_ = rbf_kernel(X, Y, gamma=self.gamma)
+        return self.lam * K_lin + (1.0 - self.lam) * K_rbf_
+
+    # -- sklearn estimator API -----------------------------------------------
+
+    def fit(self, X, y):
+        """Fit the hybrid-kernel SVM on pre-processed training data.
+
+        Stores the full training matrix ``X`` so that Gram matrices can be
+        recomputed at prediction time (required by ``kernel="precomputed"``).
+        """
+        self.X_train_ = np.asarray(X, dtype=np.float64)
+        K_train = self._compute_gram(self.X_train_)
+
+        self.svc_ = SVC(
+            C=self.C,
+            kernel="precomputed",
+            probability=True,
+            random_state=self.random_state,
+        )
+        self.svc_.fit(K_train, y)
+        self.classes_ = self.svc_.classes_
+        return self
+
+    def predict(self, X):
+        """Predict class labels for samples in *X*."""
+        X = np.asarray(X, dtype=np.float64)
+        K_test = self._compute_gram(X, self.X_train_)
+        return self.svc_.predict(K_test)
+
+    def predict_proba(self, X):
+        """Predict class probabilities via Platt scaling.
+
+        Available because the inner SVC is created with ``probability=True``.
+        """
+        X = np.asarray(X, dtype=np.float64)
+        K_test = self._compute_gram(X, self.X_train_)
+        return self.svc_.predict_proba(K_test)
+
+
+# ---------------------------------------------------------------------------
+# 8. PSO search space for Hybrid-Kernel SVM
+# ---------------------------------------------------------------------------
+# Each entry: (lower_bound, upper_bound, is_integer)
+
+HYBRID_SEARCH_SPACE: dict[str, tuple[float, float, bool]] = {
+    "C":     (0.1,  300.0, False),   # SVM regularisation
+    "gamma": (1e-4, 1.0,   False),   # RBF bandwidth
+    "lam":   (0.0,  1.0,   False),   # kernel mixing coefficient
+}
+
+
+def _decode_hybrid(position: np.ndarray) -> dict:
+    """Convert a continuous PSO position vector into HybridKernelSVC params.
+
+    Mirrors the ``_decode()`` function in xgboost_model.py — clips each
+    dimension to its legal range and rounds integers where required (none
+    in this search space, but the mechanism is kept for consistency).
+    """
+    params: dict = {}
+    for value, (name, (low, high, is_integer)) in zip(
+        position, HYBRID_SEARCH_SPACE.items()
+    ):
+        clipped = np.clip(value, low, high)
+        params[name] = int(round(clipped)) if is_integer else float(clipped)
+    return params
+
+
+# ---------------------------------------------------------------------------
+# 9. PSO fitness function (mean 5-fold stratified CV PR-AUC)
+# ---------------------------------------------------------------------------
+
+
+def _fitness_hybrid(
+    position: np.ndarray,
+    X_train,
+    y_train,
+    preprocessor,
+    use_smote: bool = True,
+    n_splits: int = 5,
+    random_state: int = 42,
+) -> float:
+    """Evaluate one PSO particle via stratified k-fold cross-validation.
+
+    Fitness = mean PR-AUC (Average Precision) across folds.
+
+    SMOTE is applied ONLY on each fold's training data — the validation
+    fold is never resampled, preventing data leakage (same guarantee as
+    the XGBoost PSO fitness function in xgboost_model.py).
+    """
+    params = _decode_hybrid(position)
+
+    skf = StratifiedKFold(
+        n_splits=n_splits,
+        shuffle=True,
+        random_state=random_state,
+    )
+
+    fold_scores: list[float] = []
+
+    for train_idx, val_idx in skf.split(X_train, y_train):
+        X_tr = X_train.iloc[train_idx]
+        X_val = X_train.iloc[val_idx]
+        y_tr = y_train.iloc[train_idx]
+        y_val = y_train.iloc[val_idx]
+
+        pipeline = build_hybrid_pipeline(
+            params=params,
+            preprocessor=preprocessor,
+            use_smote=use_smote,
+            random_state=random_state,
+        )
+
+        # IMPORTANT:
+        # If SMOTE is enabled:
+        #     preprocessing -> SMOTE -> HybridKernelSVC
+        #
+        # SMOTE only sees X_tr/y_tr.
+        # X_val remains completely untouched.
+        pipeline.fit(X_tr, y_tr)
+
+        # Probability prediction is required for PR-AUC
+        val_proba = pipeline.predict_proba(X_val)[:, 1]
+        fold_pr_auc = average_precision_score(y_val, val_proba)
+        fold_scores.append(fold_pr_auc)
+
+    return float(np.mean(fold_scores))
+
+
+# ---------------------------------------------------------------------------
+# 10. PSO result dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PSOResult:
+    """Container for PSO search results.
+
+    Same shape as the PSOResult in xgboost_model.py so downstream code
+    can treat them interchangeably.
+    """
+    best_params: dict
+    best_score: float
+    history: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# 11. PSO search for Hybrid-Kernel SVM
+# ---------------------------------------------------------------------------
+
+
+def pso_search_hybrid_svm(
+    X_train,
+    y_train,
+    preprocessor,
+    use_smote: bool = True,
+    n_particles: int = 10,
+    n_iterations: int = 10,
+    n_splits: int = 5,
+    w: float = 0.6,
+    c1: float = 1.5,
+    c2: float = 1.5,
+    random_state: int = 42,
+    verbose: bool = True,
+) -> PSOResult:
+    """Particle Swarm Optimization for HybridKernelSVC.
+
+    Pure-NumPy implementation (no pyswarms or similar library) that
+    structurally mirrors ``pso_search_xgb()`` in xgboost_model.py.
+
+    Objective
+    ---------
+    Maximize mean 5-fold stratified CV PR-AUC (Average Precision).
+
+    Search dimensions
+    -----------------
+    C, gamma, lam — see ``HYBRID_SEARCH_SPACE``.
+
+    PSO hyper-parameters
+    --------------------
+    w   : inertia weight
+    c1  : cognitive (personal-best attraction) coefficient
+    c2  : social (global-best attraction) coefficient
+    """
+    rng = np.random.default_rng(random_state)
+    n_dims = len(HYBRID_SEARCH_SPACE)
+
+    bounds_low = np.array(
+        [v[0] for v in HYBRID_SEARCH_SPACE.values()], dtype=float,
+    )
+    bounds_high = np.array(
+        [v[1] for v in HYBRID_SEARCH_SPACE.values()], dtype=float,
+    )
+
+    # ---- Initialise particles ------------------------------------------------
+
+    positions = rng.uniform(
+        low=bounds_low, high=bounds_high, size=(n_particles, n_dims),
+    )
+
+    velocities = (
+        rng.uniform(-1.0, 1.0, size=(n_particles, n_dims))
+        * (bounds_high - bounds_low)
+        * 0.10
+    )
+
+    # ---- Personal best -------------------------------------------------------
+
+    pbest_positions = positions.copy()
+
+    pbest_scores = np.array([
+        _fitness_hybrid(
+            position=p,
+            X_train=X_train,
+            y_train=y_train,
+            preprocessor=preprocessor,
+            use_smote=use_smote,
+            n_splits=n_splits,
+            random_state=random_state,
+        )
+        for p in positions
+    ])
+
+    # ---- Global best ---------------------------------------------------------
+
+    gbest_idx = int(np.argmax(pbest_scores))
+    gbest_position = pbest_positions[gbest_idx].copy()
+    gbest_score = float(pbest_scores[gbest_idx])
+    history = [gbest_score]
+
+    # ---- Initial output ------------------------------------------------------
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print(" PSO — Hybrid-Kernel SVM Hyperparameter Optimization")
+        print("=" * 70)
+        print(f"Particles        : {n_particles}")
+        print(f"Iterations       : {n_iterations}")
+        print(f"CV folds         : {n_splits}")
+        print(f"Optimization     : PR-AUC")
+        print(f"SMOTE            : {use_smote}")
+        print(f"Initial Best PR-AUC: {gbest_score:.4f}")
+        print(f"Initial Best Params:")
+        for name, value in _decode_hybrid(gbest_position).items():
+            print(f"    {name}: {value}")
+        print("=" * 70)
+
+    # ---- Main PSO loop -------------------------------------------------------
+
+    for iteration in range(n_iterations):
+
+        # Random coefficients
+        r1 = rng.uniform(0, 1, size=(n_particles, n_dims))
+        r2 = rng.uniform(0, 1, size=(n_particles, n_dims))
+
+        # Velocity update
+        velocities = (
+            w * velocities
+            + c1 * r1 * (pbest_positions - positions)
+            + c2 * r2 * (gbest_position - positions)
+        )
+
+        # Position update
+        positions = positions + velocities
+        positions = np.clip(positions, bounds_low, bounds_high)
+
+        # Evaluate new particles
+        scores = np.array([
+            _fitness_hybrid(
+                position=p,
+                X_train=X_train,
+                y_train=y_train,
+                preprocessor=preprocessor,
+                use_smote=use_smote,
+                n_splits=n_splits,
+                random_state=random_state,
+            )
+            for p in positions
+        ])
+
+        # Update personal best
+        improved = scores > pbest_scores
+        pbest_positions[improved] = positions[improved]
+        pbest_scores[improved] = scores[improved]
+
+        # Update global best
+        current_best_idx = int(np.argmax(pbest_scores))
+        current_best_score = float(pbest_scores[current_best_idx])
+
+        if current_best_score > gbest_score:
+            gbest_score = current_best_score
+            gbest_position = pbest_positions[current_best_idx].copy()
+
+        # Save history
+        history.append(gbest_score)
+
+        # Print progress
+        if verbose:
+            print(f"\n[PSO] Iteration {iteration + 1}/{n_iterations}")
+            print(f"      Best CV PR-AUC: {gbest_score:.4f}")
+            print(f"      Best Params: {_decode_hybrid(gbest_position)}")
+
+    # ---- Final result --------------------------------------------------------
+
+    best_params = _decode_hybrid(gbest_position)
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print(" PSO Optimization Completed")
+        print("=" * 70)
+        print(f"Best CV PR-AUC: {gbest_score:.4f}")
+        print("\nBest Parameters:")
+        for name, value in best_params.items():
+            print(f"    {name}: {value}")
+        print("=" * 70)
+
+    return PSOResult(
+        best_params=best_params,
+        best_score=gbest_score,
+        history=history,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 12. Build hybrid-kernel SVM pipeline
+# ---------------------------------------------------------------------------
+
+
+def build_hybrid_pipeline(
+    params: dict,
+    preprocessor,
+    use_smote: bool = True,
+    random_state: int = 42,
+) -> Pipeline:
+    """Build an imblearn Pipeline: preprocessor → (SMOTE) → HybridKernelSVC.
+
+    Reuses ``build_preprocessor()`` and ``get_smote()`` from
+    ``src.data_preprocessing`` to stay consistent with the other model
+    pipelines in this project.
+
+    Parameters
+    ----------
+    params : dict
+        Must contain keys ``C``, ``gamma``, ``lam``.
+    preprocessor : sklearn ColumnTransformer
+        As returned by ``build_preprocessor(scale_numerical=True)``.
+    use_smote : bool
+        Whether to include a SMOTE resampling step.
+    random_state : int
+        Seed for reproducibility.
+    """
+    svm = HybridKernelSVC(
+        C=params["C"],
+        gamma=params["gamma"],
+        lam=params["lam"],
+        random_state=random_state,
+    )
+
+    steps = [("preprocessor", clone(preprocessor))]
+    if use_smote:
+        steps.append(("smote", get_smote(random_state=random_state)))
+    steps.append(("svm", svm))
+
+    return Pipeline(steps=steps)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point — mirrors knn_model.py / xgboost_model.py conventions
 # ---------------------------------------------------------------------------
 
@@ -682,19 +1130,49 @@ if __name__ == "__main__":
         show=False,
     )
 
-    # ── 5. SHAP Interpretability ─────────────────────────────────────────────
-    # Saves Beeswarm, Feature Importance Bar, and Waterfall plots with the
-    # prefix ``svm_`` → filenames become:
-    #   svm_shap_beeswarm.png
-    #   svm_shap_feature_importance.png
-    #   svm_shap_waterfall.png
-    #
-    # These match the glob pattern ``{stem}_shap_*.png`` (stem = "svm") used
-    # by pages/2_Model_Comparison.py to auto-discover SHAP plots.
-    #
-    # generate_shap_explanation() automatically uses KernelExplainer for SVC
-    # (non-tree estimator), operating on already-transformed numpy arrays
-    # (post-preprocessor) so no DataFrame column passthrough is needed.
+    # ── 5. Train PSO Hybrid-Kernel SVM ──────────────────────────────────────
+    print("\n" + "=" * 70)
+    print(" Training PSO Hybrid-Kernel SVM")
+    print("=" * 70)
+
+    hybrid_preprocessor = build_preprocessor(scale_numerical=True)
+
+    pso_result = pso_search_hybrid_svm(
+        X_train=X_train,
+        y_train=y_train,
+        preprocessor=hybrid_preprocessor,
+        use_smote=True,
+        n_particles=10,
+        n_iterations=10,
+        n_splits=5,
+        random_state=42,
+        verbose=True,
+    )
+
+    hybrid_pipeline = build_hybrid_pipeline(
+        params=pso_result.best_params,
+        preprocessor=hybrid_preprocessor,
+        use_smote=True,
+        random_state=42,
+    )
+
+    print("\n[__main__] Fitting final hybrid-kernel SVM on full training data...")
+    hybrid_pipeline.fit(X_train, y_train)
+
+    # ── 6. Evaluate hybrid model ────────────────────────────────────────────
+    hybrid_metrics = evaluate_model(hybrid_pipeline, X_test, y_test)
+    print_metrics("Hybrid-Kernel SVM (PSO)", hybrid_metrics)
+
+    # ── 7. Save hybrid model ────────────────────────────────────────────────
+    hybrid_save_path = project_root / "saved_models" / "svm_pso_hybrid.pkl"
+    save_model(hybrid_pipeline, hybrid_save_path)
+
+    # ── 8. SHAP Interpretability (deferred to end) ───────────────────────────
+    # SHAP is placed AFTER all training, evaluation, and model saving because
+    # KernelExplainer (the only SHAP backend available for SVM) is extremely
+    # slow — it makes hundreds of predict_proba() calls per explained sample,
+    # each computing a full Gram matrix against the training set.  Deferring
+    # ensures the core results are always produced first.
     print("\n[__main__] Generating SVM SHAP explanation plots...")
     try:
         generate_shap_explanation(
@@ -708,3 +1186,22 @@ if __name__ == "__main__":
         print("[__main__] SHAP plots saved successfully.")
     except Exception as exc:
         print(f"[__main__] SHAP explanation failed (non-fatal): {exc}")
+
+    # ── 9. SHAP for hybrid model ────────────────────────────────────────────
+    print("\n[__main__] Generating Hybrid-Kernel SVM SHAP explanation plots...")
+    try:
+        generate_shap_explanation(
+            model=hybrid_pipeline,
+            X_test=X_test,
+            max_display=15,
+            save_dir=PLOT_DIR,
+            prefix="svm_hybrid_",
+            show=False,
+        )
+        print("[__main__] Hybrid SVM SHAP plots saved successfully.")
+    except Exception as exc:
+        print(f"[__main__] Hybrid SVM SHAP explanation failed (non-fatal): {exc}")
+
+    print("\n" + "=" * 70)
+    print(" All SVM Training and Evaluation Completed")
+    print("=" * 70)
