@@ -263,20 +263,52 @@ def remove_outliers_iqr(
         columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
     columns = [c for c in columns if c in df.columns]
 
+    n_total = len(df)
+    print(f"\n[remove_outliers_iqr] IQR diagnostics (factor={factor}):")
+    print(
+        f"    {'Column':<26}{'Q1':>12}{'Median':>12}{'Q3':>12}{'IQR':>12}"
+        f"{'Lower':>14}{'Upper':>14}{'Flagged':>12}{'% Flagged':>12}"
+    )
+    print("    " + "-" * 126)
+
     mask = pd.Series(True, index=df.index)
     for col in columns:
         Q1 = df[col].quantile(0.25)
+        med = df[col].quantile(0.50)
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
+
         if IQR == 0:
             print(
-                f"    [skip] '{col}' has IQR==0 (Q1==Q3=={Q1}); skipping to "
-                "avoid flagging every nonzero value as an outlier."
+                f"    {col:<26}{Q1:>12.3f}{med:>12.3f}{Q3:>12.3f}{IQR:>12.3f}"
+                f"{'--':>14}{'--':>14}{'SKIPPED':>12}{'--':>12}"
+            )
+            print(
+                f"        [skip] IQR==0 (Q1==Q3=={Q1}); skipping to avoid "
+                "flagging every nonzero value as an outlier."
             )
             continue
+
         lower = Q1 - factor * IQR
         upper = Q3 + factor * IQR
-        mask &= df[col].between(lower, upper)
+        col_mask = df[col].between(lower, upper)
+        n_flagged = int((~col_mask).sum())
+        pct_flagged = n_flagged / n_total * 100 if n_total else 0.0
+
+        print(
+            f"    {col:<26}{Q1:>12.3f}{med:>12.3f}{Q3:>12.3f}{IQR:>12.3f}"
+            f"{lower:>14.3f}{upper:>14.3f}{n_flagged:>12,}{pct_flagged:>11.2f}%"
+        )
+
+        mask &= col_mask
+
+    print("    " + "-" * 126)
+    n_flagged_any = int((~mask).sum())
+    pct_flagged_any = n_flagged_any / n_total * 100 if n_total else 0.0
+    print(
+        f"    [combined] Rows flagged by >=1 column: {n_flagged_any:,} "
+        f"({pct_flagged_any:.2f}% of {n_total:,})\n"
+    )
 
     _report_removal(df, mask, "remove_outliers_iqr")
     return df[mask].reset_index(drop=True)
