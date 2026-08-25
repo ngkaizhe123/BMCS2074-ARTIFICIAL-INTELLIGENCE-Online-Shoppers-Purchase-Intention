@@ -7,9 +7,9 @@ model evaluation, metrics reporting, model persistence, and SHAP explanations.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-import json
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -377,10 +377,6 @@ def generate_shap_explanation(
             for i, arr in enumerate(raw):
 
                 print(f"class {i} shape:", np.array(arr).shape)
-
-        # -------------------------------------------------------------
-
-        # 核心修复位置：将提取逻辑移到外部，确保无论 raw 是 list 还是 ndarray 都能正常给 val 赋值
 
         # -------------------------------------------------------------
 
