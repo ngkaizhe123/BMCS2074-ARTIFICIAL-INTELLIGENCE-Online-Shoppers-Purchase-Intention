@@ -39,23 +39,25 @@
   },
   "SVM Model": {
     "stem": "svm",
-    "Accuracy": 0.88529291274068,
-    "Precision": 0.6902985074626866,
-    "Recall": 0.48429319371727747,
-    "F1": 0.5692307692307692,
-    "AUC": 0.89333891051672,
+    "Threshold": 0.15999999999999998,
+    "Accuracy": 0.8791478902089308,
+    "Precision": 0.5923566878980892,
+    "Recall": 0.7303664921465969,
+    "F1": 0.6541617819460727,
+    "AUC": 0.8970119689067787,
+    "PR_AUC": 0.6812030096615583,
     "Confusion Matrix": [
       [
-        1976,
-        83
+        1867,
+        192
       ],
       [
-        197,
-        185
+        103,
+        279
       ]
     ],
-    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.91      0.96      0.93      2059\n           1       0.69      0.48      0.57       382\n\n    accuracy                           0.89      2441\n   macro avg       0.80      0.72      0.75      2441\nweighted avg       0.88      0.89      0.88      2441\n",
-    "F1 Score": 0.5692307692307692
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.95      0.91      0.93      2059\n           1       0.59      0.73      0.65       382\n\n    accuracy                           0.88      2441\n   macro avg       0.77      0.82      0.79      2441\nweighted avg       0.89      0.88      0.88      2441\n",
+    "F1 Score": 0.6541617819460727
   },
   "Asymmetric Fuzzy SVM (FSVM)": {
     "stem": "fsvm",
