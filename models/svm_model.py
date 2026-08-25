@@ -27,7 +27,7 @@ CPU Optimisations (Intel Core Ultra 5 125H — Meteor Lake hybrid)
 * OOF probability generation parallelised with cross_val_predict (loky backend, spawn-safe).
 * SVC max_iter capped at 30 000 — high enough for extreme C/gamma combos
   sampled during RandomizedSearch to converge; still prevents truly pathological
-  cases from hanging on E-cores. tol=3e-3 relaxed to aid early stopping.
+  cases from hanging on E-cores. tol=1e-3 relaxed to aid early stopping.
 * The workload is limited to 12 parallel processes to reduce contention with the operating system and other applications.
 """
 
@@ -129,7 +129,10 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     # combinations that trigger ConvergenceWarning.
     rbf_C = loguniform(0.1, 100)
     rbf_g = loguniform(1e-3, 1)
-    lin_C = loguniform(0.01, 100)
+    # Linear kernel is restricted to C <= 0.5: on non-linearly separable tabular
+    # data, linear kernels with C > 0.5 attempt to force hard boundaries on noise,
+    # causing solver stalls and ConvergenceWarning.
+    lin_C = loguniform(0.01, 0.5)
 
     # SVC is the direct final step of the pipeline (calibration is applied
     # once externally after search, not inside the pipeline).
@@ -208,8 +211,8 @@ def _build_pipeline_with_smotenc(
             ),
             # max_iter=30_000 + cache_size=1024 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
-            # tol=3e-3: relaxed to aid early stopping on E-cores and high C_eff.
-            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=3e-3, cache_size=1024)),
+            # tol=1e-3: relaxed to aid early stopping on E-cores.
+            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=1e-3, cache_size=1024)),
         ]
     )
 
@@ -226,8 +229,8 @@ def _build_pipeline_no_smote(random_state: int = 42) -> Pipeline:
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             # max_iter=30_000 + cache_size=1024 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
-            # tol=3e-3: relaxed to aid early stopping on E-cores and high C_eff.
-            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=3e-3, cache_size=1024)),
+            # tol=1e-3: relaxed to aid early stopping on E-cores.
+            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=1e-3, cache_size=1024)),
         ]
     )
 
