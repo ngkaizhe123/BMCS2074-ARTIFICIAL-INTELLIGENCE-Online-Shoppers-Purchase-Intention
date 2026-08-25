@@ -36,5 +36,24 @@
             ]
         ],
         "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.94      0.94      2059\n           1       0.69      0.68      0.68       382\n\n    accuracy                           0.90      2441\n   macro avg       0.81      0.81      0.81      2441\nweighted avg       0.90      0.90      0.90      2441\n"
-    }
+    },
+  "SVM Model": {
+    "stem": "svm",
+    "Accuracy": 0.90625,
+    "Precision": 0.6907216494845361,
+    "Recall": 0.7528089887640449,
+    "F1 Score": 0.7204301075268817,
+    "AUC": 0.9159220266006075,
+    "Confusion Matrix": [
+      [
+        1307,
+        90
+      ],
+      [
+        66,
+        201
+      ]
+    ],
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.95      0.94      0.94      1397\n           1       0.69      0.75      0.72       267\n\n    accuracy                           0.91      1664\n   macro avg       0.82      0.84      0.83      1664\nweighted avg       0.91      0.91      0.91      1664\n"
+  }
 }
