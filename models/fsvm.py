@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.pipeline import Pipeline
+from imblearn.pipeline import Pipeline
 from sklearn.svm import SVC
 
 project_root = Path(__file__).resolve().parent.parent
@@ -57,7 +57,10 @@ sys.modules["models.fsvm"] = sys.modules[__name__]
 
 from src.data_preprocessing import (
     build_preprocessor,
+    get_smote,
     preprocess_data,
+    TrainFittedDataCleaner,
+    TrainingOutlierFilter,
 )
 from src.utils import (
     evaluate_model,
@@ -206,7 +209,7 @@ def build_pipeline(
     preprocessor,
     random_state: int = 42,
 ) -> Pipeline:
-    """Build a sklearn Pipeline: preprocessor -> FuzzySVM."""
+    """Build a leakage-safe pipeline: clean -> IQR -> scale -> SMOTE -> FSVM."""
     fsvm = FuzzySVM(
         C=params["C"],
         gamma=params["gamma"],
@@ -216,7 +219,10 @@ def build_pipeline(
     )
 
     steps: list[tuple] = [
+        ("iqr", TrainingOutlierFilter(method="iqr")),
+        ("cleaner", TrainFittedDataCleaner()),
         ("preprocessor", clone(preprocessor)),
+        ("smote", get_smote(random_state)),
         ("fsvm", fsvm),
     ]
 
@@ -250,12 +256,18 @@ def train_fsvm(
     print(f"C (fixed)        : {C}")
     print(f"gamma (fixed)    : {gamma}")
     print(f"cost_ratio       : auto (majority / minority)")
-    print(f"SMOTE            : disabled (replaced by fuzzy weighting)")
+    print(f"SMOTE            : enabled inside the training pipeline")
     print("=" * 70)
 
     t_start = time.perf_counter()
     print("\n[train_fsvm] Fitting FSVM on full training data...")
     pipeline.fit(X_train, y_train)
+    iqr = pipeline.named_steps["iqr"]
+    print(
+        f"[train_fsvm] Training rows before/after IQR: "
+        f"{iqr.n_samples_before_} -> {iqr.n_samples_after_}; "
+        "test rows are never removed."
+    )
     t_end = time.perf_counter()
 
     print(f"[train_fsvm] Fitted in {t_end - t_start:.2f} seconds.")
@@ -280,7 +292,7 @@ def train_fsvm(
 if __name__ == "__main__":
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = str(project_root / "data" / "raw" / "online_shoppers_intention.csv")
-    df = preprocess_data(filepath=data_path, outlier_method="iqr")
+    df = preprocess_data(filepath=data_path)
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Train & save ─────────────────────────────────────────────────────

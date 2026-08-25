@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 from imblearn.pipeline import Pipeline
+from sklearn.base import clone
 from sklearn.metrics import (
     average_precision_score,
     f1_score,
@@ -37,7 +38,12 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.data_preprocessing import build_preprocessor, get_smote, preprocess_data
+from src.data_preprocessing import (
+    TrainFittedDataCleaner,
+    build_preprocessor,
+    get_smote,
+    preprocess_data,
+)
 from src.utils import (
     evaluate_model,
     generate_shap_explanation,
@@ -79,7 +85,8 @@ def _build_pipeline(params, preprocessor):
     )
     return Pipeline(
         [
-            ("preprocessor", preprocessor),
+            ("cleaner", TrainFittedDataCleaner()),
+            ("preprocessor", clone(preprocessor)),
             ("smote", get_smote()),
             ("xgb", xgb),
         ]
@@ -210,6 +217,8 @@ def threshold_scan(
 
 
 if __name__ == "__main__":
+    # XGBoost uses a stratified train/test split with no IQR,
+    # no Z-score filtering, and no numerical scaling.
     df = preprocess_data()
     X_train, X_test, y_train, y_test = split_dataset(df)
 

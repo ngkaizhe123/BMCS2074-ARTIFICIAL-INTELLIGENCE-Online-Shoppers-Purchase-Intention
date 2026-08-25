@@ -33,7 +33,12 @@ from sklearn.model_selection import (
 )
 from sklearn.svm import SVC
 
-from src.data_preprocessing import build_preprocessor, preprocess_data
+from src.data_preprocessing import (
+    TrainFittedDataCleaner,
+    TrainingOutlierFilter,
+    build_preprocessor,
+    preprocess_data,
+)
 from src.utils import (
     evaluate_model,
     generate_shap_explanation,
@@ -89,7 +94,11 @@ def build_svm_pipeline(use_smote: bool = True, random_state: int = 42) -> Pipeli
         tol=1e-3,
     )
 
-    steps = [("preprocessor", preprocessor)]
+    steps = [
+        ("iqr", TrainingOutlierFilter(method="iqr")),
+        ("cleaner", TrainFittedDataCleaner()),
+        ("preprocessor", preprocessor),
+    ]
     if use_smote:
         steps.append(("smote", SMOTE(random_state=random_state)))
     steps.append(("svm", svm))
@@ -143,6 +152,12 @@ def train_svm(
 
     search_obj.fit(X_train, y_train)
     raw_best_pipeline = search_obj.best_estimator_
+    iqr = raw_best_pipeline.named_steps["iqr"]
+    print(
+        f"[train_svm] Training rows before/after IQR: "
+        f"{iqr.n_samples_before_} -> {iqr.n_samples_after_}; "
+        "test rows are never removed."
+    )
 
     print(f"\n[train_svm] Best SVM params: {search_obj.best_params_}")
     print(f"[train_svm] Best CV {scoring} score: {search_obj.best_score_:.4f}")
@@ -226,7 +241,7 @@ def cross_validate_svm(
 if __name__ == "__main__":
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = str(project_root / "data" / "raw" / "online_shoppers_intention.csv")
-    df = preprocess_data(filepath=data_path, outlier_method="iqr")
+    df = preprocess_data(filepath=data_path)
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Train & save ─────────────────────────────────────────────────────

@@ -60,7 +60,7 @@ def main():
         print("[!] No trained models found. Exiting.")
         return
 
-    print(f"[*] Found {len(models)} models. Loading test data...")
+    print(f"[*] Found {len(models)} models. Loading test split...")
     df = preprocess_data(
         filepath=str(project_root / "data" / "raw" / "online_shoppers_intention.csv"),
     )
