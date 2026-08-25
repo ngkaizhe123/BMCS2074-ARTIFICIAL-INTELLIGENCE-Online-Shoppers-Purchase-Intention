@@ -163,9 +163,7 @@ def _build_pipeline_with_smotenc(
         ("cleaner", TrainFittedDataCleaner()),
     ]
     if outlier_method != "none":
-        steps.append(
-            ("outlier_filter", TrainingOutlierFilter(method=outlier_method))
-        )
+        steps.append(("outlier_filter", TrainingOutlierFilter(method=outlier_method)))
     steps += [
         ("preprocessor", build_preprocessor(scale_numerical=True)),
         (
@@ -197,9 +195,7 @@ def _build_pipeline_no_smote(
         ("cleaner", TrainFittedDataCleaner()),
     ]
     if outlier_method != "none":
-        steps.append(
-            ("outlier_filter", TrainingOutlierFilter(method=outlier_method))
-        )
+        steps.append(("outlier_filter", TrainingOutlierFilter(method=outlier_method)))
     steps += [
         ("preprocessor", build_preprocessor(scale_numerical=True)),
         (
@@ -534,7 +530,7 @@ def train_svm(
     random_state: int = 42,
     output_path: str | Path | None = None,
     verbose: int = 2,
-    n_jobs: int = _N_JOBS,  
+    n_jobs: int = _N_JOBS,
     oof_cv: int = 5,
     outlier_method: str = "iqr",
 ) -> tuple[CalibratedClassifierCV, dict]:
@@ -601,12 +597,8 @@ def train_svm(
     print("\n" + "=" * 70)
     print(" SVM Hyperparameter Search  (RandomizedSearchCV)")
     print(f" scoring={scoring!r}  n_iter={n_iter}  cv={cv}")
-    print(
-        f" n_jobs={n_jobs}{os.cpu_count()} logical threads)"
-    )
-    print(
-        f" outlier_method={outlier_method!r}"
-    )
+    print(f" n_jobs={n_jobs}{os.cpu_count()} logical threads)")
+    print(f" outlier_method={outlier_method!r}")
     print(
         f" SMOTENC categorical block: {_n_ohe_cols} columns (indices 0..{_n_ohe_cols-1})"
     )
