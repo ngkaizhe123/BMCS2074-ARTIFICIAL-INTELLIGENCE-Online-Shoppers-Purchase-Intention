@@ -5,6 +5,8 @@ Support Vector Machine (SVM) pipeline for the Online Shoppers Purchasing
 Intention classification task.
 
 Key Components:
+- Cleaner:      TrainFittedDataCleaner (imputation, duration fix, rare-cat grouping)
+               fitted on training data only — no pre-split leakage.
 - Preprocessor: StandardScaler (numerical) + OneHotEncoder (categorical).
 - Imbalance Handling: Compares SMOTENC, class_weight, and combined strategies.
 - Hyperparameter Tuning: RandomizedSearchCV optimizing PR-AUC (average_precision).
@@ -50,7 +52,6 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import (
-    GridSearchCV,
     RandomizedSearchCV,
     StratifiedKFold,
     cross_val_predict,
@@ -61,6 +62,8 @@ from sklearn.svm import SVC
 from src.data_preprocessing import (
     CATEGORICAL_FEATURES,
     NUMERICAL_FEATURES,
+    TrainFittedDataCleaner,
+    TrainingOutlierFilter,
     build_preprocessor,
     preprocess_data,
 )
@@ -153,47 +156,63 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
 def _build_pipeline_with_smotenc(
     smotenc_cat_indices: list[int],
     random_state: int = 42,
+    outlier_method: str = "iqr",
 ) -> Pipeline:
-    """Build Preprocessor -> SMOTENC -> SVC pipeline."""
-    return Pipeline(
-        steps=[
-            ("preprocessor", build_preprocessor(scale_numerical=True)),
-            (
-                "smotenc",
-                SMOTENC(
-                    categorical_features=smotenc_cat_indices,
-                    random_state=random_state,
-                ),
+    """Build TrainFittedDataCleaner -> (OutlierFilter) -> Preprocessor -> SMOTENC -> SVC pipeline."""
+    steps = [
+        ("cleaner", TrainFittedDataCleaner()),
+    ]
+    if outlier_method != "none":
+        steps.append(
+            ("outlier_filter", TrainingOutlierFilter(method=outlier_method))
+        )
+    steps += [
+        ("preprocessor", build_preprocessor(scale_numerical=True)),
+        (
+            "smotenc",
+            SMOTENC(
+                categorical_features=smotenc_cat_indices,
+                random_state=random_state,
             ),
-            (
-                "svm",
-                SVC(
-                    random_state=random_state,
-                    max_iter=60_000,
-                    tol=1e-3,
-                    cache_size=1024,
-                ),
+        ),
+        (
+            "svm",
+            SVC(
+                random_state=random_state,
+                max_iter=60_000,
+                tol=1e-3,
+                cache_size=1024,
             ),
-        ]
-    )
+        ),
+    ]
+    return Pipeline(steps=steps)
 
 
-def _build_pipeline_no_smote(random_state: int = 42) -> Pipeline:
-    """Build Preprocessor -> SVC pipeline (class_weight only)."""
-    return Pipeline(
-        steps=[
-            ("preprocessor", build_preprocessor(scale_numerical=True)),
-            (
-                "svm",
-                SVC(
-                    random_state=random_state,
-                    max_iter=60_000,
-                    tol=1e-3,
-                    cache_size=1024,
-                ),
+def _build_pipeline_no_smote(
+    random_state: int = 42,
+    outlier_method: str = "iqr",
+) -> Pipeline:
+    """Build TrainFittedDataCleaner -> (OutlierFilter) -> Preprocessor -> SVC pipeline (class_weight only)."""
+    steps = [
+        ("cleaner", TrainFittedDataCleaner()),
+    ]
+    if outlier_method != "none":
+        steps.append(
+            ("outlier_filter", TrainingOutlierFilter(method=outlier_method))
+        )
+    steps += [
+        ("preprocessor", build_preprocessor(scale_numerical=True)),
+        (
+            "svm",
+            SVC(
+                random_state=random_state,
+                max_iter=60_000,
+                tol=1e-3,
+                cache_size=1024,
             ),
-        ]
-    )
+        ),
+    ]
+    return Pipeline(steps=steps)
 
 
 # ---------------------------------------------------------------------------
@@ -515,8 +534,9 @@ def train_svm(
     random_state: int = 42,
     output_path: str | Path | None = None,
     verbose: int = 2,
-    n_jobs: int = _N_JOBS,  # default: 12 workers for Core Ultra 5 125H
+    n_jobs: int = _N_JOBS,  
     oof_cv: int = 5,
+    outlier_method: str = "iqr",
 ) -> tuple[CalibratedClassifierCV, dict]:
     """
     Tune SVM hyperparameters across three imbalance strategies, calibrate the
@@ -540,6 +560,7 @@ def train_svm(
     verbose          : Verbosity for RandomizedSearchCV.
     n_jobs           : Parallel workers.
     oof_cv           : CV folds for OOF threshold scan.
+    outlier_method   : 'iqr' | 'zscore' | 'none'  (passed to TrainingOutlierFilter).
 
     Returns
     -------
@@ -561,13 +582,18 @@ def train_svm(
     dist_A, dist_B, dist_C = _make_svm_param_distributions()
 
     # ── Determine transformed-space categorical indices for SMOTENC ──────────
-    # After the ColumnTransformer, OHE expands CATEGORICAL_FEATURES into a
-    # contiguous block of binary columns placed *before* the scaled numerical
-    # columns.  SMOTENC must know which of those transformed columns are still
-    # categorical (i.e., must not be fractionally interpolated).
+    # After TrainFittedDataCleaner + ColumnTransformer, OHE expands
+    # CATEGORICAL_FEATURES into a contiguous block of binary columns placed
+    # *before* the scaled numerical columns.  SMOTENC must know which of those
+    # transformed columns are still categorical (must not be fractionally
+    # interpolated).
+    # We fit a standalone cleaner + preprocessor probe on training data to
+    # count the OHE output columns correctly.
+    _probe_cleaner = TrainFittedDataCleaner()
+    X_train_cleaned = _probe_cleaner.fit_transform(X_train)
     _probe_pp = build_preprocessor(scale_numerical=True)
-    _probe_pp.fit(X_train, y_train)
-    _n_total_transformed = _probe_pp.transform(X_train.iloc[:1]).shape[1]
+    _probe_pp.fit(X_train_cleaned)
+    _n_total_transformed = _probe_pp.transform(X_train_cleaned.iloc[:1]).shape[1]
     _n_num = len(NUMERICAL_FEATURES)
     _n_ohe_cols = _n_total_transformed - _n_num
     smotenc_cat_idx = list(range(_n_ohe_cols))  # first N cols = OHE block
@@ -576,7 +602,10 @@ def train_svm(
     print(" SVM Hyperparameter Search  (RandomizedSearchCV)")
     print(f" scoring={scoring!r}  n_iter={n_iter}  cv={cv}")
     print(
-        f" n_jobs={n_jobs}  (CPU: Intel Core Ultra 5 125H — {os.cpu_count()} logical threads)"
+        f" n_jobs={n_jobs}{os.cpu_count()} logical threads)"
+    )
+    print(
+        f" outlier_method={outlier_method!r}"
     )
     print(
         f" SMOTENC categorical block: {_n_ohe_cols} columns (indices 0..{_n_ohe_cols-1})"
@@ -585,7 +614,9 @@ def train_svm(
 
     # ── Strategy A + C: pipelines that include SMOTENC ───────────────────────
     print("\n[train_svm] Searching Strategy A (SMOTENC only) + C (SMOTENC + weight)...")
-    pipeline_smotenc = _build_pipeline_with_smotenc(smotenc_cat_idx, random_state)
+    pipeline_smotenc = _build_pipeline_with_smotenc(
+        smotenc_cat_idx, random_state, outlier_method=outlier_method
+    )
     search_smotenc = RandomizedSearchCV(
         estimator=pipeline_smotenc,
         param_distributions=dist_A + dist_C,
@@ -610,7 +641,9 @@ def train_svm(
 
     # ── Strategy B: class_weight only ────────────────────────────────────────
     print("\n[train_svm] Searching Strategy B (class_weight only, no SMOTENC)...")
-    pipeline_no_smote = _build_pipeline_no_smote(random_state)
+    pipeline_no_smote = _build_pipeline_no_smote(
+        random_state, outlier_method=outlier_method
+    )
     search_no_smote = RandomizedSearchCV(
         estimator=pipeline_no_smote,
         param_distributions=dist_B,
@@ -781,8 +814,11 @@ def train_svm(
 
 if __name__ == "__main__":
     # ── 1. Load & split data ─────────────────────────────────────────────────
+    # preprocess_data() only applies deterministic pre-split cleaning (no
+    # outlier removal). Outlier removal is handled inside the training pipeline
+    # by TrainingOutlierFilter, which is fitted on training folds only.
     data_path = str(project_root / "data" / "raw" / "online_shoppers_intention.csv")
-    df = preprocess_data(filepath=data_path, outlier_method="iqr")
+    df = preprocess_data(filepath=data_path, outlier_method="none")
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Train & save ──────────────────────────────────────────────────────
@@ -791,6 +827,7 @@ if __name__ == "__main__":
         X_train,
         y_train,
         output_path=save_path,
+        outlier_method="iqr",  # TrainingOutlierFilter fitted on training folds only
     )
 
     optimal_threshold = result["optimal_threshold"]
