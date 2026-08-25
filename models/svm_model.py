@@ -129,49 +129,51 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     rbf_g = loguniform(1e-3, 1)
     lin_C = loguniform(0.01, 100)
 
+    # NOTE: SVC is nested inside CalibratedClassifierCV as its `estimator`,
+    # so all SVC params must be addressed via svm__estimator__<param>.
     dist_A = [
         {
-            "smotenc__k_neighbors": [3, 5, 7],
-            "svm__kernel":          ["rbf"],
-            "svm__C":               rbf_C,
-            "svm__gamma":           rbf_g,
-            "svm__class_weight":    [None],
+            "smotenc__k_neighbors":       [3, 5, 7],
+            "svm__estimator__kernel":     ["rbf"],
+            "svm__estimator__C":          rbf_C,
+            "svm__estimator__gamma":      rbf_g,
+            "svm__estimator__class_weight": [None],
         },
         {
-            "smotenc__k_neighbors": [3, 5, 7],
-            "svm__kernel":          ["linear"],
-            "svm__C":               lin_C,
-            "svm__class_weight":    [None],
+            "smotenc__k_neighbors":       [3, 5, 7],
+            "svm__estimator__kernel":     ["linear"],
+            "svm__estimator__C":          lin_C,
+            "svm__estimator__class_weight": [None],
         },
     ]
 
     dist_B = [
         {
-            "svm__kernel":       ["rbf"],
-            "svm__C":            rbf_C,
-            "svm__gamma":        rbf_g,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__estimator__kernel":       ["rbf"],
+            "svm__estimator__C":            rbf_C,
+            "svm__estimator__gamma":        rbf_g,
+            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
         {
-            "svm__kernel":       ["linear"],
-            "svm__C":            lin_C,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__estimator__kernel":       ["linear"],
+            "svm__estimator__C":            lin_C,
+            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
     ]
 
     dist_C = [
         {
-            "smotenc__k_neighbors": [3, 5, 7],
-            "svm__kernel":          ["rbf"],
-            "svm__C":               rbf_C,
-            "svm__gamma":           rbf_g,
-            "svm__class_weight":    ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "smotenc__k_neighbors":       [3, 5, 7],
+            "svm__estimator__kernel":     ["rbf"],
+            "svm__estimator__C":          rbf_C,
+            "svm__estimator__gamma":      rbf_g,
+            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
         {
-            "smotenc__k_neighbors": [3, 5, 7],
-            "svm__kernel":          ["linear"],
-            "svm__C":               lin_C,
-            "svm__class_weight":    ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "smotenc__k_neighbors":       [3, 5, 7],
+            "svm__estimator__kernel":     ["linear"],
+            "svm__estimator__C":          lin_C,
+            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
     ]
 
