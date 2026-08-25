@@ -111,26 +111,28 @@ def print_metrics(model_name: str, metrics: dict) -> None:
 
 
 def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
-    """Persist a model's metrics dict to the shared metrics.json file."""
+    """Persist a model's metrics dict to the shared metrics.json file with a standardized schema."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert non-serializable objects (like numpy arrays)
-    serializable_metrics = {"stem": stem}
-    for k, v in metrics.items():
-        if isinstance(v, np.ndarray):
-            serializable_metrics[k] = v.tolist()
-        else:
-            serializable_metrics[k] = v
+    cm = metrics.get("Confusion Matrix")
+    if hasattr(cm, "tolist"):
+        cm = cm.tolist()
 
-    # Ensure both "F1" and "F1 Score" keys exist for compatibility
-    if "F1" in metrics and "F1 Score" not in serializable_metrics:
-        serializable_metrics["F1 Score"] = metrics["F1"]
-    elif "F1 Score" in metrics and "F1" not in serializable_metrics:
-        serializable_metrics["F1"] = metrics["F1 Score"]
+    # Standardized 8-key schema matching model_visualize.py
+    serializable_metrics = {
+        "stem": stem,
+        "Accuracy": float(metrics.get("Accuracy", 0.0)),
+        "Precision": float(metrics.get("Precision", 0.0)),
+        "Recall": float(metrics.get("Recall", 0.0)),
+        "F1 Score": float(metrics.get("F1 Score", metrics.get("F1", 0.0))),
+        "AUC": float(metrics["AUC"]) if metrics.get("AUC") is not None else None,
+        "Confusion Matrix": cm,
+        "Classification Report": metrics.get("Classification Report", ""),
+    }
 
     if output_path.exists():
         try:
-            with open(output_path, "r") as f:
+            with open(output_path, "r", encoding="utf-8") as f:
                 all_metrics = json.load(f)
         except json.JSONDecodeError:
             all_metrics = {}
@@ -139,7 +141,7 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
 
     all_metrics[model_name] = serializable_metrics
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2)
 
     print(f"Metrics for {model_name} saved to {output_path}")

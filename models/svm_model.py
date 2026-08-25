@@ -127,9 +127,9 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     # RBF kernel, making the decision boundary insensitive and slow to converge.
     # Both changes keep the space practically useful while eliminating the
     # combinations that trigger ConvergenceWarning.
-    rbf_C = loguniform(0.1, 100)
-    rbf_g = loguniform(1e-3, 1)
-    lin_C = loguniform(0.01, 100)
+    rbf_C = loguniform(0.1, 50)
+    rbf_g = loguniform(1e-3, 0.05)
+    lin_C = loguniform(0.01, 60)
 
     # SVC is the direct final step of the pipeline (calibration is applied
     # once externally after search, not inside the pipeline).
@@ -587,6 +587,10 @@ def train_svm(
     print(f"[train_svm] Strategy A+C | best {scoring}: {search_smotenc.best_score_:.4f}")
     print(f"[train_svm] Strategy A+C | best params:    {search_smotenc.best_params_}")
 
+    top_smotenc = get_grid_search_results(search_smotenc)
+    print("\n[train_svm] Strategy A+C — top 15 trials by mean_test_score:")
+    print(top_smotenc.head(15).to_string(index=False))
+
     # ── Strategy B: class_weight only ────────────────────────────────────────
     print("\n[train_svm] Searching Strategy B (class_weight only, no SMOTENC)...")
     pipeline_no_smote = _build_pipeline_no_smote(random_state)
@@ -605,6 +609,10 @@ def train_svm(
     search_no_smote.fit(X_train, y_train)
     print(f"[train_svm] Strategy B    | best {scoring}: {search_no_smote.best_score_:.4f}")
     print(f"[train_svm] Strategy B    | best params:    {search_no_smote.best_params_}")
+
+    top_no_smote = get_grid_search_results(search_no_smote)
+    print("\n[train_svm] Strategy B — top 15 trials by mean_test_score:")
+    print(top_no_smote.head(15).to_string(index=False))
 
     # ── Pick the overall winner ───────────────────────────────────────────────
     if search_smotenc.best_score_ >= search_no_smote.best_score_:
@@ -780,20 +788,20 @@ if __name__ == "__main__":
     metrics_output_path = project_root / "report_assets" / "metrics.json"
     save_metrics("SVM Model", "svm", metrics, metrics_output_path)
 
-    # ── 5. SHAP Interpretability ─────────────────────────────────────────────
-    print("\n[SHAP] Generating SVM SHAP explanation plots...")
-    try:
-        plot_dir = str(project_root / "report_assets" / "plots")
-        generate_shap_explanation(
-            model=model,
-            X_test=X_test,
-            save_dir=plot_dir,
-            prefix="svm_",
-            show=False,
-        )
-        print("[SHAP] Plots saved successfully.")
-    except Exception as exc:
-        print(f"[SHAP] Skipped: {exc}")
+    # # ── 5. SHAP Interpretability ─────────────────────────────────────────────
+    # print("\n[SHAP] Generating SVM SHAP explanation plots...")
+    # try:
+    #     plot_dir = str(project_root / "report_assets" / "plots")
+    #     generate_shap_explanation(
+    #         model=model,
+    #         X_test=X_test,
+    #         save_dir=plot_dir,
+    #         prefix="svm_",
+    #         show=False,
+    #     )
+    #     print("[SHAP] Plots saved successfully.")
+    # except Exception as exc:
+    #     print(f"[SHAP] Skipped: {exc}")
 
     # ── 6. Wall-clock duration ───────────────────────────────────────────────
     _total_seconds = time.perf_counter() - _SCRIPT_START
