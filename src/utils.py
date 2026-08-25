@@ -8,7 +8,6 @@ model evaluation, metrics reporting, model persistence, and SHAP explanations.
 from __future__ import annotations
 
 import json
-import hashlib
 from pathlib import Path
 
 import joblib
@@ -46,13 +45,12 @@ def split_dataset(
     target: str = "Revenue",
     test_size: float = 0.2,
     random_state: int = 42,
-    split_path: str | Path | None = None,
 ):
-    """Load or create the project's one fixed, stratified raw holdout split.
+    """Perform a stratified train/test split on the dataset.
 
-    The manifest stores row positions after deterministic pre-split preparation.
-    Every training script and visualization calls this function, so a holdout is
-    never regenerated from model-specific (for example IQR-filtered) data.
+    To prevent data leakage, ensure the same preprocessing is applied
+    consistently across all models and that the test set is never used
+    during training or hyperparameter tuning.
     """
     X = df.drop(columns=[target]) if target in df.columns else df
     y = df[target].astype(int) if target in df.columns else None
@@ -61,52 +59,12 @@ def split_dataset(
             f"Target column '{target}' is required for a stratified split."
         )
 
-    fingerprint = hashlib.sha256(
-        pd.util.hash_pandas_object(df, index=False).values.tobytes()
-    ).hexdigest()
-    path = (
-        Path(split_path)
-        if split_path is not None
-        else Path(__file__).resolve().parent.parent
-        / "data"
-        / "processed"
-        / "fixed_train_test_split.json"
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=y
     )
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        if manifest.get("fingerprint") != fingerprint:
-            raise ValueError(
-                "The persisted split does not match the current prepared dataset. "
-                "Deliberately remove the split manifest and retrain every model."
-            )
-        train_idx = np.asarray(manifest["train_indices"], dtype=int)
-        test_idx = np.asarray(manifest["test_indices"], dtype=int)
-        print(f"[split_dataset] Loaded fixed split from {path}.")
-    else:
-        all_idx = np.arange(len(df))
-        train_idx, test_idx = train_test_split(
-            all_idx, test_size=test_size, random_state=random_state, stratify=y
-        )
-        manifest = {
-            "fingerprint": fingerprint,
-            "n_observations": len(df),
-            "test_size": test_size,
-            "random_state": random_state,
-            "train_indices": train_idx.tolist(),
-            "test_indices": test_idx.tolist(),
-        }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-        print(f"[split_dataset] Created fixed split manifest at {path}.")
 
-    X_train, X_test = X.iloc[train_idx].copy(), X.iloc[test_idx].copy()
-    y_train, y_test = y.iloc[train_idx].copy(), y.iloc[test_idx].copy()
-    print(f"[split_dataset] Raw/prepared observations: {len(df):,}")
-    print(
-        f"[split_dataset] Train: {len(X_train):,}; Test: {len(X_test):,} (test rows are untouched)"
-    )
+    print(f"[split_dataset] Total observations: {len(df):,}")
+    print(f"[split_dataset] Train: {len(X_train):,}; Test: {len(X_test):,}")
     print(
         f"[split_dataset] Train class distribution: {y_train.value_counts().sort_index().to_dict()}"
     )

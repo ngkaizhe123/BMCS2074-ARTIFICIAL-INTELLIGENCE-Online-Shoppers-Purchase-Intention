@@ -182,6 +182,8 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
         "TrainFittedDataCleaner inside a model pipeline instead."
     )
 
+    missing_before = df.isnull().sum().sum()
+
     for col in NUMERICAL_FEATURES:
         if col in df.columns and df[col].isnull().any():
             median_val = df[col].median()
@@ -738,7 +740,7 @@ def prepare_dataset_for_split(df: pd.DataFrame) -> pd.DataFrame:
 
     Anything that learns from feature distributions belongs in a fitted pipeline,
     not here.  This is intentionally the only preparation allowed before the
-    project's shared train/test split is made.
+    train/test split is made.
     """
     print(f"\n[prepare_dataset_for_split] Starting. Input shape: {df.shape}")
     df = remove_duplicates(df)
@@ -1005,7 +1007,7 @@ def preprocess_data(
     # 1. Load
     df = load_data(filepath)
 
-    # Only deterministic preparation is allowed before the shared split.
+    # Only deterministic preparation is allowed before the train/test split.
     df = run_preprocessing_pipeline(df, outlier_method=outlier_method)
 
     return df

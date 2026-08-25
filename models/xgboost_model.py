@@ -189,7 +189,6 @@ def train_xgboost(
 
     model = _build_pipeline(result["best_params"], preprocessor)
     model.fit(X_train, y_train)
-    model.leakage_safe_protocol_ = "fixed-split-v1"
 
     if output_path:
         save_model(model, output_path)
@@ -218,7 +217,7 @@ def threshold_scan(
 
 
 if __name__ == "__main__":
-    # XGBoost intentionally uses the shared raw/prepared split with no IQR,
+    # XGBoost uses a stratified train/test split with no IQR,
     # no Z-score filtering, and no numerical scaling.
     df = preprocess_data()
     X_train, X_test, y_train, y_test = split_dataset(df)

@@ -251,7 +251,6 @@ def train_knn_rf_ensemble(
         estimator=ensemble, method="sigmoid", cv=5
     )
     calibrated_ensemble.fit(X_train, y_train)
-    calibrated_ensemble.leakage_safe_protocol_ = "fixed-split-v1"
 
     # ---- Step 5: Save the finished model so it can be reused later --------
     if output_path:

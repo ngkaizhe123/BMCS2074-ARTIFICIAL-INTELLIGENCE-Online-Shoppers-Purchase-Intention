@@ -278,7 +278,6 @@ def train_fsvm(
         ensemble=False,
     )
     calibrated_model.fit(X_train, y_train)
-    calibrated_model.leakage_safe_protocol_ = "fixed-split-v1"
 
     if output_path:
         save_model(calibrated_model, output_path)
