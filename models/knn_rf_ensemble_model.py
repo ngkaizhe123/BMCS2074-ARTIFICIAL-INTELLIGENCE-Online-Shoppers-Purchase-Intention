@@ -256,7 +256,7 @@ if __name__ == "__main__":
     # Load data and split into train/test sets.
     # preprocess_data() cleans the raw CSV (dedup, impute, group rare categories, etc.).
     # split_dataset() performs the stratified train/test split (in utils.py).
-    df = preprocess_data()
+    df = preprocess_data(outlier_method="iqr")
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # Train the model and save it to disk.
