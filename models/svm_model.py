@@ -15,7 +15,7 @@ Key changes vs. original
 * Search space covers three *distinct* imbalance strategies:
     (A) SMOTENC only,  (B) class_weight only,  (C) Both combined.
 * n_iter raised to 60, scoring changed to "average_precision" (PR-AUC).
-* OOF threshold scanner (np.arange(0.20, 0.61, 0.02)) maximises F1 on
+* OOF threshold scanner (np.arange(0.10, 0.81, 0.01)) maximises F1 on
   cross-validation data; the frozen threshold is then applied to the test set.
 * Import time module; wall-clock duration printed at the very end.
 
@@ -28,9 +28,7 @@ CPU Optimisations (Intel Core Ultra 5 125H — Meteor Lake hybrid)
 * SVC max_iter capped at 10 000 — high enough for extreme C/gamma combos
   sampled during RandomizedSearch to converge; still prevents truly pathological
   cases from hanging on E-cores. tol=1e-3 relaxed to aid early stopping.
-* joblib parallel_backend set globally to 'loky' with prefer='processes' so
-  each worker gets a dedicated OS thread that the scheduler can pin to a
-  P-core or E-core as appropriate.
+* The workload is limited to 12 parallel processes to reduce contention with the operating system and other applications.
 """
 
 from __future__ import annotations
@@ -129,51 +127,51 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     rbf_g = loguniform(1e-3, 1)
     lin_C = loguniform(0.01, 100)
 
-    # NOTE: SVC is nested inside CalibratedClassifierCV as its `estimator`,
-    # so all SVC params must be addressed via svm__estimator__<param>.
+    # SVC is the direct final step of the pipeline (calibration is applied
+    # once externally after search, not inside the pipeline).
     dist_A = [
         {
-            "smotenc__k_neighbors":       [3, 5, 7],
-            "svm__estimator__kernel":     ["rbf"],
-            "svm__estimator__C":          rbf_C,
-            "svm__estimator__gamma":      rbf_g,
-            "svm__estimator__class_weight": [None],
+            "smotenc__k_neighbors": [3, 5, 7],
+            "svm__kernel":          ["rbf"],
+            "svm__C":               rbf_C,
+            "svm__gamma":           rbf_g,
+            "svm__class_weight":    [None],
         },
         {
-            "smotenc__k_neighbors":       [3, 5, 7],
-            "svm__estimator__kernel":     ["linear"],
-            "svm__estimator__C":          lin_C,
-            "svm__estimator__class_weight": [None],
+            "smotenc__k_neighbors": [3, 5, 7],
+            "svm__kernel":          ["linear"],
+            "svm__C":               lin_C,
+            "svm__class_weight":    [None],
         },
     ]
 
     dist_B = [
         {
-            "svm__estimator__kernel":       ["rbf"],
-            "svm__estimator__C":            rbf_C,
-            "svm__estimator__gamma":        rbf_g,
-            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__kernel":       ["rbf"],
+            "svm__C":            rbf_C,
+            "svm__gamma":        rbf_g,
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
         {
-            "svm__estimator__kernel":       ["linear"],
-            "svm__estimator__C":            lin_C,
-            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__kernel":       ["linear"],
+            "svm__C":            lin_C,
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
     ]
 
     dist_C = [
         {
-            "smotenc__k_neighbors":       [3, 5, 7],
-            "svm__estimator__kernel":     ["rbf"],
-            "svm__estimator__C":          rbf_C,
-            "svm__estimator__gamma":      rbf_g,
-            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "smotenc__k_neighbors": [3, 5, 7],
+            "svm__kernel":          ["rbf"],
+            "svm__C":               rbf_C,
+            "svm__gamma":           rbf_g,
+            "svm__class_weight":    ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
         {
-            "smotenc__k_neighbors":       [3, 5, 7],
-            "svm__estimator__kernel":     ["linear"],
-            "svm__estimator__C":          lin_C,
-            "svm__estimator__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "smotenc__k_neighbors": [3, 5, 7],
+            "svm__kernel":          ["linear"],
+            "svm__C":               lin_C,
+            "svm__class_weight":    ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
         },
     ]
 
@@ -188,7 +186,12 @@ def _build_pipeline_with_smotenc(
     smotenc_cat_indices: list[int],
     random_state: int = 42,
 ) -> Pipeline:
-    """Preprocessor -> SMOTENC -> CalibratedClassifierCV(SVC)  (imblearn Pipeline)."""
+    """Preprocessor -> SMOTENC -> SVC  (imblearn Pipeline).
+
+    Calibration is applied once externally via CalibratedClassifierCV after
+    RandomizedSearchCV selects the best estimator.  Embedding calibration here
+    would create a double-calibration stack once the outer wrapper is added.
+    """
     return Pipeline(
         steps=[
             ("preprocessor", build_preprocessor(scale_numerical=True)),
@@ -199,41 +202,28 @@ def _build_pipeline_with_smotenc(
                     random_state=random_state,
                 ),
             ),
-            # CalibratedClassifierCV(ensemble=False) wraps SVC to expose
-            # predict_proba via Platt scaling.  SVC(probability=True) is
-            # deprecated in sklearn 1.9+ — use this pattern instead.
             # max_iter=10_000 + cache_size=512 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
             # tol=1e-3: relaxed to aid early stopping on E-cores.
-            (
-                "svm",
-                CalibratedClassifierCV(
-                    SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512),
-                    ensemble=False,
-                ),
-            ),
+            ("svm", SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512)),
         ]
     )
 
 
 def _build_pipeline_no_smote(random_state: int = 42) -> Pipeline:
-    """Preprocessor -> CalibratedClassifierCV(SVC)  (class_weight handles imbalance; no oversampler)."""
+    """Preprocessor -> SVC  (class_weight handles imbalance; no oversampler).
+
+    Calibration is applied once externally via CalibratedClassifierCV after
+    RandomizedSearchCV selects the best estimator.  Embedding calibration here
+    would create a double-calibration stack once the outer wrapper is added.
+    """
     return Pipeline(
         steps=[
             ("preprocessor", build_preprocessor(scale_numerical=True)),
-            # CalibratedClassifierCV(ensemble=False) wraps SVC to expose
-            # predict_proba via Platt scaling.  SVC(probability=True) is
-            # deprecated in sklearn 1.9+ — use this pattern instead.
             # max_iter=10_000 + cache_size=512 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
             # tol=1e-3: relaxed to aid early stopping on E-cores.
-            (
-                "svm",
-                CalibratedClassifierCV(
-                    SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512),
-                    ensemble=False,
-                ),
-            ),
+            ("svm", SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512)),
         ]
     )
 
@@ -265,7 +255,7 @@ def find_optimal_threshold_oof(
     raw_pipeline : Unfitted best estimator from RandomizedSearchCV.best_estimator_.
     X_train      : Full training feature DataFrame.
     y_train      : Full training labels (array-like).
-    thresholds   : Candidate cutoffs (default: np.arange(0.20, 0.61, 0.02)).
+    thresholds   : Candidate cutoffs (default: np.arange(0.10, 0.81, 0.01)).
     metric       : Optimisation target — 'f1' (default) or 'recall'.
     cv           : Number of stratified CV folds.
     random_state : RNG seed for fold splitting.
@@ -275,7 +265,7 @@ def find_optimal_threshold_oof(
     float : Frozen optimal threshold to apply to the test set.
     """
     if thresholds is None:
-        thresholds = np.arange(0.20, 0.61, 0.02)
+        thresholds = np.arange(0.10, 0.81, 0.01)
 
     y_arr = np.asarray(y_train)
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
@@ -527,10 +517,20 @@ def train_svm(
 
     # ── Pick the overall winner ───────────────────────────────────────────────
     if search_smotenc.best_score_ >= search_no_smote.best_score_:
-        best_search   = search_smotenc
-        best_strategy = "A+C (SMOTENC)"
+        best_search = search_smotenc
+
+        # Distinguish Strategy A from Strategy C
+        best_class_weight = search_smotenc.best_params_.get(
+            "svm__estimator__class_weight"
+        )
+
+        if best_class_weight is None:
+            best_strategy = "A (SMOTENC only)"
+        else:
+            best_strategy = "C (SMOTENC + class_weight)"
+
     else:
-        best_search   = search_no_smote
+        best_search = search_no_smote
         best_strategy = "B (class_weight only)"
 
     print(f"\n[train_svm] Winning strategy : {best_strategy}")
@@ -539,7 +539,12 @@ def train_svm(
 
     raw_best_pipeline = best_search.best_estimator_
 
-    # ── Probability calibration (prefit on full training set) ─────────────────
+    # ── Single calibration layer — wrap the best pipeline once ───────────────
+    # CalibratedClassifierCV(raw_best_pipeline) adds exactly one Platt-scaling
+    # layer on top of the (preprocessor -> SVC) pipeline.  Do NOT embed
+    # CalibratedClassifierCV inside the pipeline builders as well, or the final
+    # model becomes SVC -> Calibration #1 -> Calibration #2 which distorts
+    # probability estimates.
     calibrated_model = CalibratedClassifierCV(
         estimator=raw_best_pipeline,
         ensemble=False,
@@ -547,12 +552,33 @@ def train_svm(
     )
     calibrated_model.fit(X_train, y_train)
 
-    # ── OOF threshold scan (uses CV on training data only — test untouched) ───
+    # ── Convergence guard: warn if max_iter was hit ───────────────────────────
+    # Access the inner SVC through the calibrated model's fitted calibrators.
+    # CalibratedClassifierCV(ensemble=False) produces a single calibrator.
+    try:
+        inner_svc = calibrated_model.calibrated_classifiers_[0].estimator.named_steps["svm"]
+        if hasattr(inner_svc, "n_iter_"):
+            n_iter_arr = np.asarray(inner_svc.n_iter_)
+            if np.any(n_iter_arr >= 10_000):
+                print(
+                    f"[WARNING] SVC may not have converged — hit max_iter=10,000 "
+                    f"(n_iter_={n_iter_arr.tolist()}).  Consider raising max_iter "
+                    f"or relaxing C/tol for the selected hyperparameters."
+                )
+            else:
+                print(f"[train_svm] SVC converged within max_iter (n_iter_={n_iter_arr.tolist()}).")
+    except (AttributeError, IndexError, KeyError):
+        print("[train_svm] Could not inspect SVC n_iter_ (non-critical).")
+
+    # ── OOF threshold scan ────────────────────────────────────────────────────
+    # Pass calibrated_model (not raw_best_pipeline) so the probability
+    # architecture used to select the threshold is identical to the one used
+    # for test-set prediction — both go through the same single calibration.
     optimal_threshold = find_optimal_threshold_oof(
-        raw_pipeline=raw_best_pipeline,
+        raw_pipeline=calibrated_model,
         X_train=X_train,
         y_train=np.asarray(y_train),
-        thresholds=np.arange(0.20, 0.61, 0.02),
+        thresholds=np.arange(0.10, 0.81, 0.01),
         metric=threshold_metric,
         cv=oof_cv,
         random_state=random_state,
