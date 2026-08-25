@@ -127,9 +127,9 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     # RBF kernel, making the decision boundary insensitive and slow to converge.
     # Both changes keep the space practically useful while eliminating the
     # combinations that trigger ConvergenceWarning.
-    rbf_C = loguniform(0.1, 50)
-    rbf_g = loguniform(1e-3, 0.05)
-    lin_C = loguniform(0.01, 60)
+    rbf_C = loguniform(0.1, 100)
+    rbf_g = loguniform(1e-3, 1)
+    lin_C = loguniform(0.01, 100)
 
     # SVC is the direct final step of the pipeline (calibration is applied
     # once externally after search, not inside the pipeline).
