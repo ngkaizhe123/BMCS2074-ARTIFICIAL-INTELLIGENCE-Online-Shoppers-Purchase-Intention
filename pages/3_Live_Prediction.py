@@ -436,11 +436,8 @@ if submitted:
                 purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
             )
 
-            # Trigger Success/Failure animations based on prediction
-            if prediction == 1:
-                st.balloons()
-            else:
-                st.snow()
+            # Trigger Success/Failure toast notifications based on prediction
+            # (Animations/Toasts removed as per user request)
 
             verdict_banner(bool(prediction == 1), confidence_pct)
 
@@ -515,13 +512,8 @@ if submitted:
             if total_count > 0:
                 from src.ui_theme import multi_model_verdict_banner
 
-                if purchase_count == total_count:
-                    # All models agree: Purchase → balloons
-                    st.balloons()
-                elif purchase_count == 0:
-                    # All models agree: No Purchase → snow
-                    st.snow()
-                # Mixed results → no balloons/snow, just the amber banner
+                # Mixed results → no toasts, just the amber banner
+                pass
 
                 multi_model_verdict_banner(purchase_count, total_count)
 
@@ -541,10 +533,12 @@ if submitted:
                         st.error("❌ No Purchase")
 
                     if result["prob"] is not None:
-                        st.caption(
-                            f"Purchase Probability: {result['pur_prob']*100:.1f}%"
-                        )
                         probability_meter(result["pur_prob"])
+                        st.metric(
+                            "No Purchase prob.", f"{result['prob'][0] * 100:.1f}%"
+                        )
+                        st.metric("Purchase prob.", f"{result['prob'][1] * 100:.1f}%")
+                        st.metric("Confidence", confidence_label(result["pur_prob"]))
                     else:
                         st.caption("No probability available")
 
