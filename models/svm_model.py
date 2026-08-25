@@ -24,7 +24,7 @@ CPU Optimisations (Intel Core Ultra 5 125H — Meteor Lake hybrid)
 * Hybrid topology: 4 P-cores (8 HT) + 8 E-cores + 2 LP-E-cores = 18 threads.
 * N_JOBS = 12 — saturates P-cores + half the E-cores; leaves LP-E-cores and
   some P-threads free for OS scheduling and memory bandwidth tasks.
-* OOF fold loop parallelised with joblib.Parallel (loky backend, spawn-safe).
+* OOF probability generation parallelised with cross_val_predict (loky backend, spawn-safe).
 * SVC max_iter capped at 10 000 — high enough for extreme C/gamma combos
   sampled during RandomizedSearch to converge; still prevents truly pathological
   cases from hanging on E-cores. tol=1e-3 relaxed to aid early stopping.
@@ -68,7 +68,6 @@ import matplotlib.pyplot as plt
 from imblearn.over_sampling import SMOTENC
 from imblearn.pipeline import Pipeline
 from scipy.stats import loguniform
-from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     accuracy_score,
@@ -84,6 +83,7 @@ from sklearn.model_selection import (
     GridSearchCV,
     RandomizedSearchCV,
     StratifiedKFold,
+    cross_val_predict,
     cross_validate,
 )
 from sklearn.svm import SVC
@@ -289,40 +289,22 @@ def find_optimal_threshold_oof(
 
     y_arr = np.asarray(y_train)
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
-    splits = list(skf.split(X_train, y_arr))
 
     print(
         f"\n[OOF Threshold Scanner] {cv}-fold OOF | "
         f"{len(thresholds)} thresholds | balanced selection ..."
-        f"  (parallel n_jobs={_N_JOBS}, backend=loky)"
+        f"  (parallel n_jobs={_N_JOBS})"
     )
 
-    # ── Parallel OOF fold fitting (loky, spawn-safe) ─────────────────────────
-    def _fit_fold(fold_idx: int, tr_idx, val_idx):
-        X_fold_tr  = X_train.iloc[tr_idx]
-        y_fold_tr  = y_arr[tr_idx]
-        X_fold_val = X_train.iloc[val_idx]
-
-        fold_pipe = clone(raw_pipeline)
-        fold_pipe.fit(X_fold_tr, y_fold_tr)
-        proba_val = fold_pipe.predict_proba(X_fold_val)[:, 1]
-        print(f"  Fold {fold_idx + 1}/{cv} completed.")
-        return val_idx, proba_val
-
-    with joblib.parallel_backend("loky", n_jobs=_N_JOBS):
-        fold_results = joblib.Parallel(verbose=0)(
-            joblib.delayed(_fit_fold)(fold_idx, tr_idx, val_idx)
-            for fold_idx, (tr_idx, val_idx) in enumerate(splits)
-        )
-
-    oof_proba = np.zeros(len(y_arr), dtype=np.float64)
-    for val_idx, proba_val in fold_results:
-        if len(proba_val) != len(val_idx):
-            raise RuntimeError(
-                f"OOF length mismatch: val_idx has {len(val_idx)} entries "
-                f"but proba_val has {len(proba_val)}."
-            )
-        oof_proba[val_idx] = proba_val
+    # ── Out-of-fold probability estimation via cross_val_predict ─────────────
+    oof_proba = cross_val_predict(
+        raw_pipeline,
+        X_train,
+        y_arr,
+        cv=skf,
+        method="predict_proba",
+        n_jobs=_N_JOBS,
+    )[:, 1]
 
     # ── Compute P / R / F1 for every threshold ───────────────────────────────
     rows = []
