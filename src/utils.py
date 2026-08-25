@@ -7,9 +7,9 @@ model evaluation, metrics reporting, model persistence, and SHAP explanations.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-import json
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -46,13 +46,32 @@ def split_dataset(
     test_size: float = 0.2,
     random_state: int = 42,
 ):
-    """Split dataset into features X and target y, and then into train/test splits."""
+    """Perform a stratified train/test split on the dataset.
+
+    To prevent data leakage, ensure the same preprocessing is applied
+    consistently across all models and that the test set is never used
+    during training or hyperparameter tuning.
+    """
     X = df.drop(columns=[target]) if target in df.columns else df
     y = df[target].astype(int) if target in df.columns else None
+    if y is None:
+        raise ValueError(
+            f"Target column '{target}' is required for a stratified split."
+        )
 
-    return train_test_split(
+    X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
     )
+
+    print(f"[split_dataset] Total observations: {len(df):,}")
+    print(f"[split_dataset] Train: {len(X_train):,}; Test: {len(X_test):,}")
+    print(
+        f"[split_dataset] Train class distribution: {y_train.value_counts().sort_index().to_dict()}"
+    )
+    print(
+        f"[split_dataset] Test class distribution: {y_test.value_counts().sort_index().to_dict()}"
+    )
+    return X_train, X_test, y_train, y_test
 
 
 def save_cleaned_dataset(
@@ -240,7 +259,15 @@ def generate_shap_explanation(
     if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
         # Standard Pipeline: pre-transform X_test and explain in feature space
         preprocessor = model.named_steps["preprocessor"]
-        X_transformed = preprocessor.transform(X_test)
+        # Keep SHAP aligned with the fitted inference route.  The cleaner is
+        # a row-preserving transformer; any outlier sampler is intentionally
+        # skipped at inference by imblearn Pipeline.
+        X_for_preprocessor = (
+            model.named_steps["cleaner"].transform(X_test)
+            if "cleaner" in model.named_steps
+            else X_test
+        )
+        X_transformed = preprocessor.transform(X_for_preprocessor)
         if hasattr(X_transformed, "toarray"):
             X_transformed = X_transformed.toarray()
         feature_names = (
@@ -364,10 +391,6 @@ def generate_shap_explanation(
             for i, arr in enumerate(raw):
 
                 print(f"class {i} shape:", np.array(arr).shape)
-
-        # -------------------------------------------------------------
-
-        # 核心修复位置：将提取逻辑移到外部，确保无论 raw 是 list 还是 ndarray 都能正常给 val 赋值
 
         # -------------------------------------------------------------
 
