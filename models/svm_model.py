@@ -25,9 +25,9 @@ CPU Optimisations (Intel Core Ultra 5 125H — Meteor Lake hybrid)
 * N_JOBS = 12 — saturates P-cores + half the E-cores; leaves LP-E-cores and
   some P-threads free for OS scheduling and memory bandwidth tasks.
 * OOF probability generation parallelised with cross_val_predict (loky backend, spawn-safe).
-* SVC max_iter capped at 10 000 — high enough for extreme C/gamma combos
+* SVC max_iter capped at 30 000 — high enough for extreme C/gamma combos
   sampled during RandomizedSearch to converge; still prevents truly pathological
-  cases from hanging on E-cores. tol=1e-3 relaxed to aid early stopping.
+  cases from hanging on E-cores. tol=3e-3 relaxed to aid early stopping.
 * The workload is limited to 12 parallel processes to reduce contention with the operating system and other applications.
 """
 
@@ -206,10 +206,10 @@ def _build_pipeline_with_smotenc(
                     random_state=random_state,
                 ),
             ),
-            # max_iter=10_000 + cache_size=512 MB: larger kernel cache reduces
+            # max_iter=30_000 + cache_size=1024 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
-            # tol=1e-3: relaxed to aid early stopping on E-cores.
-            ("svm", SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512)),
+            # tol=3e-3: relaxed to aid early stopping on E-cores and high C_eff.
+            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=3e-3, cache_size=1024)),
         ]
     )
 
@@ -224,10 +224,10 @@ def _build_pipeline_no_smote(random_state: int = 42) -> Pipeline:
     return Pipeline(
         steps=[
             ("preprocessor", build_preprocessor(scale_numerical=True)),
-            # max_iter=10_000 + cache_size=512 MB: larger kernel cache reduces
+            # max_iter=30_000 + cache_size=1024 MB: larger kernel cache reduces
             # the number of SMO re-computations, so fewer iterations are needed.
-            # tol=1e-3: relaxed to aid early stopping on E-cores.
-            ("svm", SVC(random_state=random_state, max_iter=10_000, tol=1e-3, cache_size=512)),
+            # tol=3e-3: relaxed to aid early stopping on E-cores and high C_eff.
+            ("svm", SVC(random_state=random_state, max_iter=30_000, tol=3e-3, cache_size=1024)),
         ]
     )
 
@@ -682,9 +682,9 @@ def train_svm(
         inner_svc = calibrated_model.calibrated_classifiers_[0].estimator.named_steps["svm"]
         if hasattr(inner_svc, "n_iter_"):
             n_iter_arr = np.asarray(inner_svc.n_iter_)
-            if np.any(n_iter_arr >= 10_000):
+            if np.any(n_iter_arr >= 30_000):
                 print(
-                    f"[WARNING] SVC may not have converged — hit max_iter=10,000 "
+                    f"[WARNING] SVC may not have converged — hit max_iter=30,000 "
                     f"(n_iter_={n_iter_arr.tolist()}).  Consider raising max_iter "
                     f"or relaxing C/tol for the selected hyperparameters."
                 )

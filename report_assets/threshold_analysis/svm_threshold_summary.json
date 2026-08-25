@@ -2,7 +2,7 @@
   "selected_threshold": 0.17,
   "max_oof_f1": 0.708,
   "band_99pct_count": 5,
-  "selected_precision": 0.6949,
-  "selected_recall": 0.7092,
-  "selected_f1": 0.7019
+  "selected_precision": 0.6939,
+  "selected_recall": 0.7083,
+  "selected_f1": 0.701
 }
