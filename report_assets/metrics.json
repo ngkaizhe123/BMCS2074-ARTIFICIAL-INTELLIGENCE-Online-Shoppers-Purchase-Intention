@@ -37,7 +37,7 @@
     ],
     "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.94      0.94      2059\n           1       0.69      0.68      0.68       382\n\n    accuracy                           0.90      2441\n   macro avg       0.81      0.81      0.81      2441\nweighted avg       0.90      0.90      0.90      2441\n"
   },
-  "SVM Model": {
+  "Svm Model": {
     "stem": "svm",
     "Accuracy": 0.8795575583777141,
     "Precision": 0.6078431372549019,

@@ -840,11 +840,11 @@ if __name__ == "__main__":
     metrics = evaluate_model_with_threshold(
         model, X_test, y_test, threshold=optimal_threshold
     )
-    print_metrics("SVM Model", metrics)
+    print_metrics("Svm Model", metrics)
 
     # ── 4. Persist metrics ───────────────────────────────────────────────────
     metrics_output_path = project_root / "report_assets" / "metrics.json"
-    save_metrics("SVM Model", "svm", metrics, metrics_output_path)
+    save_metrics("Svm Model", "svm", metrics, metrics_output_path)
 
     # ── 5. SHAP Interpretability ──────────────────────────────────
     try:
