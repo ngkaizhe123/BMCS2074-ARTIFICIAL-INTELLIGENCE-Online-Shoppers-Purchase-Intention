@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from scipy import stats
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -176,7 +177,10 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     This step is kept as a safeguard so the pipeline remains robust if the
     dataset is ever updated or partially filled with NaN during merges.
     """
-    missing_before = df.isnull().sum().sum()
+    raise RuntimeError(
+        "handle_missing_values is not safe before a split. Use "
+        "TrainFittedDataCleaner inside a model pipeline instead."
+    )
 
     for col in NUMERICAL_FEATURES:
         if col in df.columns and df[col].isnull().any():
@@ -259,8 +263,11 @@ def remove_outliers_iqr(
     per-column IQR first (a column with IQR==0 will flag almost everything
     as an outlier).
     """
-    if columns is None:
-        columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
+    raise RuntimeError(
+        "remove_outliers_iqr cannot be run on a full dataset. Use "
+        "TrainingOutlierFilter(method='iqr') inside a training pipeline."
+    )
+    columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
     columns = [c for c in columns if c in df.columns]
 
     n_total = len(df)
@@ -333,8 +340,11 @@ def remove_outliers_zscore(
     on remove_outliers_iqr) — running Z-score on categorical ID codes like
     Browser/OperatingSystems is not meaningful.
     """
-    if columns is None:
-        columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
+    raise RuntimeError(
+        "remove_outliers_zscore cannot be run on a full dataset. Use "
+        "TrainingOutlierFilter(method='zscore') inside a training pipeline."
+    )
+    columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
     columns = [c for c in columns if c in df.columns]
 
     z_scores = np.abs(stats.zscore(df[columns], nan_policy="omit"))
@@ -475,7 +485,10 @@ def fix_duration_consistency(df: pd.DataFrame) -> pd.DataFrame:
     introduces noise: e.g. a session with 10 product pages but 0 seconds
     would mislead the model into thinking heavy browsing = instant action.
     """
-    df = df.copy()
+    raise RuntimeError(
+        "fix_duration_consistency learns medians and is not safe before a split. "
+        "Use TrainFittedDataCleaner inside a model pipeline instead."
+    )
     total_fixed = 0
 
     for pages_col, dur_col in PAGE_DURATION_PAIRS:
@@ -626,7 +639,10 @@ def validate_categorical_values(df: pd.DataFrame) -> pd.DataFrame:
     mode is safe because these columns have dominant categories
     (e.g. ~85% Returning_Visitor) and a single misfire won't bias the model.
     """
-    df = df.copy()
+    raise RuntimeError(
+        "validate_categorical_values learns modes and is not safe before a split. "
+        "Use TrainFittedDataCleaner inside a model pipeline instead."
+    )
     total_fixed = 0
 
     validations = {
@@ -687,7 +703,10 @@ def group_rare_categories(
     This applies to integer ID-coded categorical features (OperatingSystems, Browser,
     TrafficType, Region) to reduce noise and dimensionality before One-Hot Encoding.
     """
-    df = df.copy()
+    raise RuntimeError(
+        "group_rare_categories learns frequencies and is not safe before a split. "
+        "Use TrainFittedDataCleaner inside a model pipeline instead."
+    )
     cols_to_group = ["OperatingSystems", "Browser", "TrafficType", "Region"]
     for col in cols_to_group:
         if col in df.columns:
@@ -712,6 +731,150 @@ def group_rare_categories(
 # ---------------------------------------------------------------------------
 # Step 11 – Unified Cleaning Pipeline (used for CSV export & preprocess_data)
 # ---------------------------------------------------------------------------
+
+
+def prepare_dataset_for_split(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply only deterministic, non-data-learned preparation before splitting.
+
+    Anything that learns from feature distributions belongs in a fitted pipeline,
+    not here.  This is intentionally the only preparation allowed before the
+    project's shared train/test split is made.
+    """
+    print(f"\n[prepare_dataset_for_split] Starting. Input shape: {df.shape}")
+    df = remove_duplicates(df)
+    df = validate_business_rules(df)
+
+    # These rules use fixed, domain-defined constants only.
+    df = df.copy()
+    for pages_col, dur_col in PAGE_DURATION_PAIRS:
+        if pages_col in df.columns and dur_col in df.columns:
+            df.loc[(df[pages_col] == 0) & (df[dur_col] > 0), dur_col] = 0
+    df = cap_duration_outliers(df)
+    df = clip_rates(df)
+    df = drop_special_day(df)
+    df = encode_target(df)
+    print(f"[prepare_dataset_for_split] Done. Output shape: {df.shape}\n")
+    return df
+
+
+class TrainFittedDataCleaner(BaseEstimator, TransformerMixin):
+    """Data-dependent cleaning fitted on a training partition only.
+
+    The transformer learns imputation values, duration medians, categorical
+    replacement modes, and rare-category maps in ``fit``.  ``transform``
+    applies those already-fitted values to either training or test data and
+    never removes rows.
+    """
+
+    def __init__(self, rare_threshold: int = 10):
+        self.rare_threshold = rare_threshold
+
+    def fit(self, X, y=None):
+        X = X.copy()
+        self.numeric_medians_ = {
+            c: X[c].median() for c in NUMERICAL_FEATURES if c in X.columns
+        }
+        self.categorical_modes_ = {
+            c: X[c].mode().iloc[0]
+            for c in CATEGORICAL_FEATURES
+            if c in X.columns and not X[c].mode().empty
+        }
+        self.nonzero_duration_medians_ = {}
+        for pages_col, dur_col in PAGE_DURATION_PAIRS:
+            if pages_col in X.columns and dur_col in X.columns:
+                values = X.loc[X[dur_col] > 0, dur_col]
+                self.nonzero_duration_medians_[dur_col] = (
+                    values.median() if not values.empty else 0.0
+                )
+        self.rare_categories_ = {}
+        for col in ["OperatingSystems", "Browser", "TrafficType", "Region"]:
+            if col in X.columns:
+                counts = X[col].astype(str).value_counts()
+                self.rare_categories_[col] = set(
+                    counts[counts < self.rare_threshold].index
+                )
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        for col, value in self.numeric_medians_.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(value)
+        for col, value in self.categorical_modes_.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(value)
+
+        for pages_col, dur_col in PAGE_DURATION_PAIRS:
+            if pages_col not in X.columns or dur_col not in X.columns:
+                continue
+            X.loc[(X[pages_col] == 0) & (X[dur_col] > 0), dur_col] = 0
+            missing_duration = (X[pages_col] > 0) & (X[dur_col] == 0)
+            X.loc[missing_duration, dur_col] = self.nonzero_duration_medians_[dur_col]
+
+        valid_sets = {"Month": VALID_MONTHS, "VisitorType": VALID_VISITOR_TYPES}
+        for col, valid in valid_sets.items():
+            if col in X.columns:
+                invalid = ~X[col].isin(valid)
+                if invalid.any():
+                    X.loc[invalid, col] = self.categorical_modes_[col]
+        if "Weekend" in X.columns:
+            X["Weekend"] = X["Weekend"].astype(bool)
+
+        for col, rare_values in self.rare_categories_.items():
+            if col in X.columns:
+                X[col] = X[col].astype(str)
+                X.loc[X[col].isin(rare_values), col] = f"Other_{col}"
+        return X
+
+
+class TrainingOutlierFilter(BaseEstimator):
+    """imblearn sampler that removes rows only while a pipeline is fitted.
+
+    Its ``fit_resample`` learns bounds and returns filtered training rows.
+    imblearn deliberately skips samplers during ``predict``/``predict_proba``;
+    test observations therefore cannot be removed.
+    """
+
+    def __init__(
+        self,
+        method: str = "iqr",
+        columns=None,
+        factor: float = 1.5,
+        threshold: float = 3.0,
+    ):
+        self.method = method
+        self.columns = columns
+        self.factor = factor
+        self.threshold = threshold
+
+    def fit_resample(self, X, y):
+        if self.method not in {"iqr", "zscore"}:
+            raise ValueError("method must be 'iqr' or 'zscore'")
+        columns = self.columns or CONTINUOUS_FEATURES_FOR_OUTLIERS
+        self.columns_ = [c for c in columns if c in X.columns]
+        mask = pd.Series(True, index=X.index)
+        self.bounds_ = {}
+        for col in self.columns_:
+            if self.method == "iqr":
+                q1, q3 = X[col].quantile(0.25), X[col].quantile(0.75)
+                spread = q3 - q1
+                if spread == 0:
+                    continue
+                lower, upper = q1 - self.factor * spread, q3 + self.factor * spread
+                self.bounds_[col] = (lower, upper)
+                mask &= X[col].between(lower, upper)
+            else:
+                mean, std = X[col].mean(), X[col].std()
+                if std == 0 or pd.isna(std):
+                    continue
+                self.bounds_[col] = (mean, std)
+                mask &= (X[col] - mean).abs() < self.threshold * std
+        self.n_samples_before_ = len(X)
+        self.n_samples_after_ = int(mask.sum())
+        self.n_samples_removed_ = self.n_samples_before_ - self.n_samples_after_
+        return X.loc[mask], (
+            y.loc[mask] if hasattr(y, "loc") else np.asarray(y)[mask.to_numpy()]
+        )
 
 
 def run_preprocessing_pipeline(
@@ -741,34 +904,12 @@ def run_preprocessing_pipeline(
     """
     print(f"\n[run_preprocessing_pipeline] Starting. Input shape: {df.shape}")
 
-    # --- Technical cleaning ---
-    df = remove_duplicates(df)
-    df = handle_missing_values(df)
-
-    # --- Business rule validation & fixes ---
-    df = validate_business_rules(df)
-    df = fix_duration_consistency(df)
-    df = cap_duration_outliers(df)
-    df = clip_rates(df)
-    df = validate_categorical_values(df)
-    df = group_rare_categories(df)
-    df = drop_special_day(df)
-
-    # --- Statistical outlier removal (optional) ---
-    if outlier_method == "iqr":
-        df = remove_outliers_iqr(df)
-    elif outlier_method == "zscore":
-        df = remove_outliers_zscore(df)
-    elif outlier_method != "none":
+    if outlier_method != "none":
         raise ValueError(
-            f"Unknown outlier_method '{outlier_method}'. "
-            "Use 'none', 'iqr', or 'zscore'."
+            "Outlier removal must be a TrainingOutlierFilter inside a training "
+            "pipeline. It cannot be applied before the train/test split."
         )
-
-    df = encode_target(df)
-
-    print(f"[run_preprocessing_pipeline] Done. Output shape: {df.shape}\n")
-    return df
+    return prepare_dataset_for_split(df)
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +1005,7 @@ def preprocess_data(
     # 1. Load
     df = load_data(filepath)
 
-    # 2–5. Clean (duplicates → missing values → outliers → encode target)
+    # Only deterministic preparation is allowed before the shared split.
     df = run_preprocessing_pipeline(df, outlier_method=outlier_method)
 
     return df

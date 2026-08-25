@@ -60,7 +60,7 @@ def main():
         print("[!] No trained models found. Exiting.")
         return
 
-    print(f"[*] Found {len(models)} models. Loading test data...")
+    print(f"[*] Found {len(models)} models. Loading the persisted shared test split...")
     df = preprocess_data(
         filepath=str(project_root / "data" / "raw" / "online_shoppers_intention.csv"),
     )
@@ -76,6 +76,11 @@ def main():
         print(f"    -> Evaluating {name}...")
         try:
             model = load_model(info["path"])
+            if getattr(model, "leakage_safe_protocol_", None) != "fixed-split-v1":
+                raise RuntimeError(
+                    "This is a legacy model trained before the fixed-split, "
+                    "train-only preprocessing protocol. Retrain it first."
+                )
             metrics = evaluate_model(model, X_test, y_test)
 
             cm = metrics["Confusion Matrix"]

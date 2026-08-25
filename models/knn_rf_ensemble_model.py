@@ -20,6 +20,8 @@ from src.data_preprocessing import (
     build_preprocessor,
     get_smote,
     preprocess_data,
+    TrainFittedDataCleaner,
+    TrainingOutlierFilter,
 )
 from src.utils import (
     evaluate_model,
@@ -125,6 +127,8 @@ def train_knn_rf_ensemble(
     # 3. Run the KNN model itself.
     knn_pipeline_template = Pipeline(
         steps=[
+            ("iqr", TrainingOutlierFilter(method="iqr")),
+            ("cleaner", TrainFittedDataCleaner()),
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
             ("knn", KNeighborsClassifier()),
@@ -134,6 +138,8 @@ def train_knn_rf_ensemble(
     # Same idea, but for Random Forest.
     rf_pipeline_template = Pipeline(
         steps=[
+            ("iqr", TrainingOutlierFilter(method="iqr")),
+            ("cleaner", TrainFittedDataCleaner()),
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
             ("rf", RandomForestClassifier(random_state=42, n_jobs=-1)),
@@ -159,6 +165,11 @@ def train_knn_rf_ensemble(
         ) from e
 
     best_knn = knn_search.best_estimator_
+    knn_iqr = best_knn.named_steps["iqr"]
+    print(
+        f"[train_knn_rf_ensemble] KNN training rows before/after IQR: "
+        f"{knn_iqr.n_samples_before_} -> {knn_iqr.n_samples_after_}"
+    )
     print(
         f"\n[train_knn_rf_ensemble] Best KNN settings found: {knn_search.best_params_}"
     )
@@ -180,6 +191,11 @@ def train_knn_rf_ensemble(
         ) from e
 
     best_rf = rf_search.best_estimator_
+    rf_iqr = best_rf.named_steps["iqr"]
+    print(
+        f"[train_knn_rf_ensemble] RF training rows before/after IQR: "
+        f"{rf_iqr.n_samples_before_} -> {rf_iqr.n_samples_after_}"
+    )
     print(
         f"[train_knn_rf_ensemble] Best Random Forest settings found: {rf_search.best_params_}"
     )
@@ -235,6 +251,7 @@ def train_knn_rf_ensemble(
         estimator=ensemble, method="sigmoid", cv=5
     )
     calibrated_ensemble.fit(X_train, y_train)
+    calibrated_ensemble.leakage_safe_protocol_ = "fixed-split-v1"
 
     # ---- Step 5: Save the finished model so it can be reused later --------
     if output_path:
@@ -256,7 +273,7 @@ if __name__ == "__main__":
     # Load data and split into train/test sets.
     # preprocess_data() cleans the raw CSV (dedup, impute, group rare categories, etc.).
     # split_dataset() performs the stratified train/test split (in utils.py).
-    df = preprocess_data(outlier_method="iqr")
+    df = preprocess_data()
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # Train the model and save it to disk.
