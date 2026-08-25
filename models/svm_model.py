@@ -59,8 +59,12 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import joblib
+import json
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend — safe for CLI + Streamlit
+import matplotlib.pyplot as plt
 from imblearn.over_sampling import SMOTENC
 from imblearn.pipeline import Pipeline
 from scipy.stats import loguniform
@@ -237,35 +241,51 @@ def find_optimal_threshold_oof(
     X_train: pd.DataFrame,
     y_train,
     thresholds: np.ndarray | None = None,
-    metric: str = "f1",
     cv: int = 5,
     random_state: int = 42,
-) -> float:
+) -> tuple[float, pd.DataFrame]:
     """
-    Find the optimal decision threshold via Out-Of-Fold (OOF) probabilities.
+    Find the optimal decision threshold via Out-Of-Fold (OOF) probabilities
+    using balanced selection — 99% F1-band tie-breaking.
 
-    For each stratified fold, a *fresh clone* of raw_pipeline is calibrated on
+    For each stratified fold a *fresh clone* of ``raw_pipeline`` is fitted on
     the in-fold data and produces probabilities for the held-out fold.  The
-    pooled OOF probabilities are scanned across `thresholds` to find the cutoff
-    that maximises `metric`.  This threshold is then *frozen* and applied to
-    the untouched test set — no test-set information leaks into the decision.
+    pooled OOF probabilities are scanned across ``thresholds``.  **No test-set
+    data is used anywhere in this function.**
+
+    Balanced selection algorithm
+    ---------------------------
+    1. Compute Precision / Recall / F1 for every candidate threshold.
+    2. Identify the maximum OOF F1.
+    3. Keep all thresholds where  F1 >= 0.99 × max_F1  ("99 % band").
+    4. Among those, choose the threshold with:
+       a) highest Precision,
+       b) highest Recall       (tie-breaker),
+       c) highest F1           (tie-breaker),
+       d) closest to 0.50      (final tie-breaker).
 
     Parameters
     ----------
-    raw_pipeline : Unfitted best estimator from RandomizedSearchCV.best_estimator_.
+    raw_pipeline : Unfitted / clonable estimator (e.g. CalibratedClassifierCV
+                   wrapping the best pipeline from RandomizedSearchCV).
     X_train      : Full training feature DataFrame.
     y_train      : Full training labels (array-like).
     thresholds   : Candidate cutoffs (default: np.arange(0.10, 0.81, 0.01)).
-    metric       : Optimisation target — 'f1' (default) or 'recall'.
     cv           : Number of stratified CV folds.
     random_state : RNG seed for fold splitting.
 
     Returns
     -------
-    float : Frozen optimal threshold to apply to the test set.
+    (selected_threshold, threshold_results_df)
+        selected_threshold : float — frozen threshold for test-set evaluation.
+        threshold_results_df : pd.DataFrame with columns
+            [Threshold, Precision, Recall, F1].
     """
     if thresholds is None:
         thresholds = np.arange(0.10, 0.81, 0.01)
+
+    if len(thresholds) == 0:
+        raise ValueError("Threshold array is empty — cannot scan.")
 
     y_arr = np.asarray(y_train)
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
@@ -273,12 +293,11 @@ def find_optimal_threshold_oof(
 
     print(
         f"\n[OOF Threshold Scanner] {cv}-fold OOF | "
-        f"{len(thresholds)} thresholds | optimising '{metric}' ..."
+        f"{len(thresholds)} thresholds | balanced selection ..."
         f"  (parallel n_jobs={_N_JOBS}, backend=loky)"
     )
 
     # ── Parallel OOF fold fitting (loky, spawn-safe) ─────────────────────────
-    # Each fold clones and fits independently — no shared mutable state.
     def _fit_fold(fold_idx: int, tr_idx, val_idx):
         X_fold_tr  = X_train.iloc[tr_idx]
         y_fold_tr  = y_arr[tr_idx]
@@ -286,9 +305,6 @@ def find_optimal_threshold_oof(
 
         fold_pipe = clone(raw_pipeline)
         fold_pipe.fit(X_fold_tr, y_fold_tr)
-        # The pipeline's final step is CalibratedClassifierCV(SVC(), ensemble=False)
-        # which exposes predict_proba directly — no extra wrapping needed.
-
         proba_val = fold_pipe.predict_proba(X_fold_val)[:, 1]
         print(f"  Fold {fold_idx + 1}/{cv} completed.")
         return val_idx, proba_val
@@ -301,27 +317,121 @@ def find_optimal_threshold_oof(
 
     oof_proba = np.zeros(len(y_arr), dtype=np.float64)
     for val_idx, proba_val in fold_results:
+        if len(proba_val) != len(val_idx):
+            raise RuntimeError(
+                f"OOF length mismatch: val_idx has {len(val_idx)} entries "
+                f"but proba_val has {len(proba_val)}."
+            )
         oof_proba[val_idx] = proba_val
 
-    best_thresh, best_score = 0.5, -1.0
+    # ── Compute P / R / F1 for every threshold ───────────────────────────────
+    rows = []
     for thr in thresholds:
         y_pred = (oof_proba >= thr).astype(int)
-        if metric == "f1":
-            score = f1_score(y_arr, y_pred, zero_division=0)
-        elif metric == "recall":
-            score = recall_score(y_arr, y_pred, zero_division=0)
-        else:
-            raise ValueError(f"Unsupported metric '{metric}'. Use 'f1' or 'recall'.")
+        rows.append({
+            "Threshold": round(float(thr), 4),
+            "Precision": precision_score(y_arr, y_pred, zero_division=0),
+            "Recall":    recall_score(y_arr, y_pred, zero_division=0),
+            "F1":        f1_score(y_arr, y_pred, zero_division=0),
+        })
 
-        if score > best_score:
-            best_score  = score
-            best_thresh = thr
+    df_thr = pd.DataFrame(rows)
+
+    if df_thr.empty or df_thr["F1"].max() == 0:
+        print("[WARNING] No valid threshold found — falling back to 0.50.")
+        return 0.50, df_thr
+
+    # ── Balanced selection ────────────────────────────────────────────────────
+    max_f1 = df_thr["F1"].max()
+    band = df_thr[df_thr["F1"] >= 0.99 * max_f1].copy()
+
+    # Sort by the tie-breaking hierarchy (descending for metrics, ascending
+    # for distance to 0.50) — first row after sort is the winner.
+    band["_dist_05"] = (band["Threshold"] - 0.50).abs()
+    band = band.sort_values(
+        by=["Precision", "Recall", "F1", "_dist_05"],
+        ascending=[False, False, False, True],
+    )
+    selected = band.iloc[0]
+    selected_threshold = float(selected["Threshold"])
 
     print(
-        f"[OOF Threshold Scanner] Optimal threshold = {best_thresh:.2f} "
-        f"(OOF {metric} = {best_score:.4f})\n"
+        f"[OOF Threshold Scanner] max OOF F1 = {max_f1:.4f} "
+        f"| 99%% band: {len(band)} thresholds"
     )
-    return float(best_thresh)
+    print(
+        f"[OOF Threshold Scanner] Selected threshold = {selected_threshold:.2f}  "
+        f"(P={selected['Precision']:.4f}  R={selected['Recall']:.4f}  "
+        f"F1={selected['F1']:.4f})"
+    )
+
+    return selected_threshold, df_thr
+
+
+# ---------------------------------------------------------------------------
+# Threshold analysis plots
+# ---------------------------------------------------------------------------
+
+def _plot_threshold_metrics(
+    df_thr: pd.DataFrame,
+    selected_threshold: float,
+    save_path: str | Path,
+) -> None:
+    """Plot Precision, Recall, F1 vs Threshold and mark the selected point."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(df_thr["Threshold"], df_thr["Precision"], label="Precision", linewidth=1.5)
+    ax.plot(df_thr["Threshold"], df_thr["Recall"],    label="Recall",    linewidth=1.5)
+    ax.plot(df_thr["Threshold"], df_thr["F1"],        label="F1",        linewidth=2.0)
+
+    # Mark the selected threshold
+    sel_row = df_thr.loc[(df_thr["Threshold"] - selected_threshold).abs().idxmin()]
+    ax.axvline(selected_threshold, color="red", linestyle="--", alpha=0.7,
+               label=f"Selected = {selected_threshold:.2f}")
+    ax.scatter([selected_threshold], [sel_row["F1"]], color="red", s=80, zorder=5)
+
+    ax.set_xlabel("Threshold")
+    ax.set_ylabel("Score")
+    ax.set_title("SVM — Threshold Metrics (OOF, training data only)")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(save_path), dpi=150)
+    plt.close(fig)
+    print(f"[Threshold Plot] Saved: {save_path}")
+
+
+def _plot_precision_recall_threshold(
+    df_thr: pd.DataFrame,
+    selected_threshold: float,
+    save_path: str | Path,
+) -> None:
+    """Plot Precision vs Recall curve and mark the selected threshold."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot(df_thr["Recall"], df_thr["Precision"], linewidth=1.5, color="steelblue")
+
+    # Mark the selected threshold
+    sel_row = df_thr.loc[(df_thr["Threshold"] - selected_threshold).abs().idxmin()]
+    ax.scatter([sel_row["Recall"]], [sel_row["Precision"]], color="red", s=100, zorder=5,
+              label=f"Threshold = {selected_threshold:.2f}")
+    ax.annotate(
+        f"  t={selected_threshold:.2f}",
+        xy=(sel_row["Recall"], sel_row["Precision"]),
+        fontsize=9, color="red",
+    )
+
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title("SVM — Precision vs Recall (OOF, training data only)")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(save_path), dpi=150)
+    plt.close(fig)
+    print(f"[PR Plot] Saved: {save_path}")
 
 
 def predict_with_threshold(model, X, threshold: float = 0.5) -> np.ndarray:
@@ -415,7 +525,6 @@ def train_svm(
     output_path: str | Path | None = None,
     verbose: int = 2,
     n_jobs: int = _N_JOBS,  # default: 12 workers for Core Ultra 5 125H
-    threshold_metric: str = "f1",
     oof_cv: int = 5,
 ) -> tuple[CalibratedClassifierCV, dict]:
     """
@@ -439,7 +548,6 @@ def train_svm(
     output_path      : .pkl save path for the calibrated model.
     verbose          : Verbosity for RandomizedSearchCV.
     n_jobs           : Parallel workers.
-    threshold_metric : OOF optimisation target ('f1' | 'recall').
     oof_cv           : CV folds for OOF threshold scan.
 
     Returns
@@ -451,6 +559,7 @@ def train_svm(
           'best_strategy'     – winning strategy label string
           'best_search'       – winning RandomizedSearchCV object
           'optimal_threshold' – frozen threshold (float) from OOF scan
+          'threshold_results' – pd.DataFrame of per-threshold P/R/F1
     """
     if output_path is None:
         output_path = project_root / "saved_models" / "svm_model.pkl"
@@ -521,7 +630,7 @@ def train_svm(
 
         # Distinguish Strategy A from Strategy C
         best_class_weight = search_smotenc.best_params_.get(
-            "svm__estimator__class_weight"
+            "svm__class_weight"
         )
 
         if best_class_weight is None:
@@ -574,14 +683,74 @@ def train_svm(
     # Pass calibrated_model (not raw_best_pipeline) so the probability
     # architecture used to select the threshold is identical to the one used
     # for test-set prediction — both go through the same single calibration.
-    optimal_threshold = find_optimal_threshold_oof(
+    optimal_threshold, threshold_results_df = find_optimal_threshold_oof(
         raw_pipeline=calibrated_model,
         X_train=X_train,
         y_train=np.asarray(y_train),
         thresholds=np.arange(0.10, 0.81, 0.01),
-        metric=threshold_metric,
         cv=oof_cv,
         random_state=random_state,
+    )
+
+    # ── Persist threshold analysis artefacts ──────────────────────────────────
+    thr_dir  = project_root / "report_assets" / "threshold_analysis"
+    plot_dir = project_root / "report_assets" / "plots"
+    thr_dir.mkdir(parents=True, exist_ok=True)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    # CSV — full threshold table
+    csv_path = thr_dir / "svm_threshold_results.csv"
+    threshold_results_df.to_csv(csv_path, index=False, float_format="%.4f")
+    print(f"[train_svm] Threshold table saved: {csv_path}")
+
+    # JSON — summary of the selected threshold
+    summary = {
+        "selected_threshold": round(optimal_threshold, 4),
+        "max_oof_f1":         round(float(threshold_results_df["F1"].max()), 4),
+        "band_99pct_count":   int(
+            (threshold_results_df["F1"] >= 0.99 * threshold_results_df["F1"].max()).sum()
+        ),
+        "selected_precision": round(
+            float(
+                threshold_results_df.loc[
+                    (threshold_results_df["Threshold"] - optimal_threshold).abs().idxmin(),
+                    "Precision",
+                ]
+            ),
+            4,
+        ),
+        "selected_recall": round(
+            float(
+                threshold_results_df.loc[
+                    (threshold_results_df["Threshold"] - optimal_threshold).abs().idxmin(),
+                    "Recall",
+                ]
+            ),
+            4,
+        ),
+        "selected_f1": round(
+            float(
+                threshold_results_df.loc[
+                    (threshold_results_df["Threshold"] - optimal_threshold).abs().idxmin(),
+                    "F1",
+                ]
+            ),
+            4,
+        ),
+    }
+    json_path = thr_dir / "svm_threshold_summary.json"
+    with open(json_path, "w") as fh:
+        json.dump(summary, fh, indent=2)
+    print(f"[train_svm] Threshold summary saved: {json_path}")
+
+    # Plots
+    _plot_threshold_metrics(
+        threshold_results_df, optimal_threshold,
+        save_path=plot_dir / "svm_threshold_metrics.png",
+    )
+    _plot_precision_recall_threshold(
+        threshold_results_df, optimal_threshold,
+        save_path=plot_dir / "svm_precision_recall_threshold.png",
     )
 
     if output_path:
@@ -593,6 +762,7 @@ def train_svm(
         "best_strategy":     best_strategy,
         "best_search":       best_search,
         "optimal_threshold": optimal_threshold,
+        "threshold_results": threshold_results_df,
     }
 
 
