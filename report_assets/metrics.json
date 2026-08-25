@@ -55,24 +55,5 @@
       ]
     ],
     "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.95      0.94      0.94      1397\n           1       0.69      0.75      0.72       267\n\n    accuracy                           0.91      1664\n   macro avg       0.82      0.84      0.83      1664\nweighted avg       0.91      0.91      0.91      1664\n"
-  },
-  "Asymmetric Fuzzy SVM (FSVM)": {
-    "stem": "fsvm",
-    "Accuracy": 0.889389594428513,
-    "Precision": 0.6971830985915493,
-    "Recall": 0.518324607329843,
-    "F1 Score": 0.5945945945945946,
-    "AUC": 0.9015317759599664,
-    "Confusion Matrix": [
-      [
-        1973,
-        86
-      ],
-      [
-        184,
-        198
-      ]
-    ],
-    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.91      0.96      0.94      2059\n           1       0.70      0.52      0.59       382\n\n    accuracy                           0.89      2441\n   macro avg       0.81      0.74      0.77      2441\nweighted avg       0.88      0.89      0.88      2441\n"
   }
 }
