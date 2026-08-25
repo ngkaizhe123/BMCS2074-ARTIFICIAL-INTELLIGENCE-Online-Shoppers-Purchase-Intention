@@ -323,18 +323,42 @@ def find_optimal_threshold_oof(
         print("[WARNING] No valid threshold found — falling back to 0.50.")
         return 0.50, df_thr
 
-    # ── Balanced selection ────────────────────────────────────────────────────
+    # ── Balanced selection within 99% F1 band ────────────────────────────────
     max_f1 = df_thr["F1"].max()
     band = df_thr[df_thr["F1"] >= 0.99 * max_f1].copy()
 
-    # Sort by the tie-breaking hierarchy (descending for metrics, ascending
-    # for distance to 0.50) — first row after sort is the winner.
-    band["_dist_05"] = (band["Threshold"] - 0.50).abs()
-    band = band.sort_values(
-        by=["Precision", "Recall", "F1", "_dist_05"],
-        ascending=[False, False, False, True],
+    # Optional minimum acceptable performance
+    min_precision = 0.60
+    min_recall = 0.60
+
+    constrained = band[
+        (band["Precision"] >= min_precision) &
+        (band["Recall"] >= min_recall)
+    ].copy()
+
+    # If constraints are too strict, fall back to the full 99% band
+    if constrained.empty:
+        print(
+            "[WARNING] No threshold satisfies minimum precision/recall constraints. "
+            "Using full 99% F1 band."
+        )
+        constrained = band.copy()
+
+    # Balance precision and recall
+    constrained["_pr_gap"] = (
+        constrained["Precision"] - constrained["Recall"]
+    ).abs()
+
+    constrained["_dist_05"] = (
+        constrained["Threshold"] - 0.50
+    ).abs()
+
+    constrained = constrained.sort_values(
+        by=["_pr_gap", "F1", "Recall", "_dist_05"],
+        ascending=[True, False, False, True],
     )
-    selected = band.iloc[0]
+
+    selected = constrained.iloc[0]
     selected_threshold = float(selected["Threshold"])
 
     print(
