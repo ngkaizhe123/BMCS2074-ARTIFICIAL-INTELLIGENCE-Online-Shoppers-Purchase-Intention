@@ -226,7 +226,7 @@ def cross_validate_svm(
 if __name__ == "__main__":
     # ── 1. Load & split data ────────────────────────────────────────────────
     data_path = str(project_root / "data" / "raw" / "online_shoppers_intention.csv")
-    df = preprocess_data(filepath=data_path)
+    df = preprocess_data(filepath=data_path, outlier_method="iqr")
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # ── 2. Train & save ─────────────────────────────────────────────────────
