@@ -263,8 +263,18 @@ st.markdown("#### ⚡ Quick fill")
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.button("🟢 High-intent example", on_click=load_preset, args=(HIGH_INTENT_EXAMPLE,))
 c2.button("🔴 Low-intent example", on_click=load_preset, args=(LOW_INTENT_EXAMPLE,))
-c3.button("🎲 Random: Purchase", on_click=load_random_real_session, args=(1,), help="Load a random real session where the customer made a purchase (Revenue = 1).")
-c4.button("🎲 Random: No Purchase", on_click=load_random_real_session, args=(0,), help="Load a random real session where the customer did NOT make a purchase (Revenue = 0).")
+c3.button(
+    "🎲 Random: Purchase",
+    on_click=load_random_real_session,
+    args=(1,),
+    help="Load a random real session where the customer made a purchase (Revenue = 1).",
+)
+c4.button(
+    "🎲 Random: No Purchase",
+    on_click=load_random_real_session,
+    args=(0,),
+    help="Load a random real session where the customer did NOT make a purchase (Revenue = 0).",
+)
 c5.button("↩️ Reset form", on_click=load_preset, args=(DEFAULT_EXAMPLE,))
 
 if "_last_random_truth" in st.session_state:
