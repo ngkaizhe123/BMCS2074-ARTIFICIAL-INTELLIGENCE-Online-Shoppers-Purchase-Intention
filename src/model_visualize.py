@@ -76,11 +76,35 @@ def main():
         print(f"    -> Evaluating {name}...")
         try:
             model = load_model(info["path"])
-            metrics = evaluate_model(model, X_test, y_test)
+
+            # Resolve decision threshold (model attribute -> threshold analysis summary -> fallback 0.5)
+            threshold = getattr(model, "optimal_threshold_", None)
+            if threshold is None:
+                summary_file = (
+                    project_root
+                    / "report_assets"
+                    / "threshold_analysis"
+                    / f"{info['stem']}_threshold_summary.json"
+                )
+                if summary_file.exists():
+                    try:
+                        with open(summary_file, "r", encoding="utf-8") as sf:
+                            summary_data = json.load(sf)
+                            threshold = summary_data.get("selected_threshold")
+                    except Exception:
+                        pass
+            if threshold is None:
+                threshold = 0.5
+
+            threshold = float(threshold)
+            model.optimal_threshold_ = threshold
+
+            metrics = evaluate_model(model, X_test, y_test, threshold=threshold)
 
             cm = metrics["Confusion Matrix"]
             all_metrics[name] = {
                 "stem": info["stem"],
+                "Threshold": threshold,
                 "Accuracy": float(metrics["Accuracy"]),
                 "Precision": float(metrics["Precision"]),
                 "Recall": float(metrics["Recall"]),
@@ -93,8 +117,10 @@ def main():
             safe_name = info["stem"]
 
             # Confusion Matrix
-            fig_cm = plot_confusion_matrix(model, X_test, y_test)
-            fig_cm.axes[0].set_title(f"Confusion Matrix ({name})", fontweight="bold")
+            fig_cm = plot_confusion_matrix(model, X_test, y_test, threshold=threshold)
+            fig_cm.axes[0].set_title(
+                f"Confusion Matrix ({name} @ t={threshold:.2f})", fontweight="bold"
+            )
             fig_cm.savefig(
                 PLOT_DIR / f"confusion_matrix_{safe_name}.png",
                 dpi=300,

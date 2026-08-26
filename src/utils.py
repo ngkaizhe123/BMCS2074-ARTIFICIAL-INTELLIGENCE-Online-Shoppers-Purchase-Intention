@@ -90,14 +90,28 @@ def save_cleaned_dataset(
     )
 
 
-def evaluate_model(model, X_test, y_test) -> dict:
-    """Evaluate a trained model and return a dictionary of evaluation metrics."""
-    y_pred = model.predict(X_test)
+def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
+    """Evaluate a trained model and return a dictionary of evaluation metrics.
+
+    Threshold resolution:
+      1. If `threshold` is passed explicitly, use it.
+      2. Else if the model has an `.optimal_threshold_` attribute, use that.
+      3. Else default to 0.5.
+    """
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
+
     y_prob = (
         model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
     )
+    y_pred = (
+        (y_prob >= threshold).astype(int)
+        if y_prob is not None
+        else model.predict(X_test)
+    )
 
     metrics = {
+        "Threshold": threshold,
         "Accuracy": accuracy_score(y_test, y_pred),
         "Precision": precision_score(y_test, y_pred, zero_division=0),
         "Recall": recall_score(y_test, y_pred, zero_division=0),
@@ -115,6 +129,8 @@ def print_metrics(model_name: str, metrics: dict) -> None:
     print("=" * 50)
     print(f" Model Evaluation Metrics: {model_name}")
     print("=" * 50)
+    if metrics.get("Threshold") is not None:
+        print(f"Threshold: {metrics['Threshold']:.4f}")
     print(f"Accuracy : {metrics['Accuracy']:.4f}")
     print(f"Precision: {metrics['Precision']:.4f}")
     print(f"Recall   : {metrics['Recall']:.4f}")
@@ -137,9 +153,10 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
     if hasattr(cm, "tolist"):
         cm = cm.tolist()
 
-    # Standardized 8-key schema matching model_visualize.py
+    # Standardized schema matching model_visualize.py
     serializable_metrics = {
         "stem": stem,
+        "Threshold": float(metrics.get("Threshold", 0.5)),
         "Accuracy": float(metrics.get("Accuracy", 0.0)),
         "Precision": float(metrics.get("Precision", 0.0)),
         "Recall": float(metrics.get("Recall", 0.0)),
@@ -166,9 +183,14 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
     print(f"Metrics for {model_name} saved to {output_path}")
 
 
-def plot_confusion_matrix(model, X_test, y_test):
-    """Plot confusion matrix chart."""
-    predictions = model.predict(X_test)
+def plot_confusion_matrix(model, X_test, y_test, threshold: float | None = None):
+    """Plot confusion matrix chart, using the model's tuned threshold if set."""
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
+    if hasattr(model, "predict_proba"):
+        predictions = (model.predict_proba(X_test)[:, 1] >= threshold).astype(int)
+    else:
+        predictions = model.predict(X_test)
     cm = confusion_matrix(y_test, predictions)
 
     display = ConfusionMatrixDisplay(confusion_matrix=cm)

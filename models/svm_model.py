@@ -791,6 +791,8 @@ def train_svm(
         save_path=plot_dir / "svm_precision_recall_threshold.png",
     )
 
+    calibrated_model.optimal_threshold_ = float(optimal_threshold)
+
     if output_path:
         save_model(calibrated_model, output_path)
 
