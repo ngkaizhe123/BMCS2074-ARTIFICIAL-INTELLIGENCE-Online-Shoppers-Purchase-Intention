@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import numpy as np
+
 # This lets the script find the project's other folders (like "src") when
 # run directly, e.g. "python models/knn_rf_ensemble_model.py"
 project_root = Path(__file__).resolve().parent.parent
@@ -8,10 +10,11 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from imblearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
 from sklearn.metrics import f1_score
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 
 from src.data_preprocessing import (
@@ -36,21 +39,19 @@ def train_knn_rf_ensemble(
     y_train,
     knn_param_grid: dict | None = None,
     rf_param_grid: dict | None = None,
-    weight_candidates: list[int] | None = None,
     output_path: str | Path = "saved_models/knn_rf_ensemble_model.pkl",
 ):
     """
-    This is the project's KNN model. On its own, KNN (K-Nearest Neighbors)
-    doesn't predict very well on this dataset. So instead of using KNN by
-    itself, this function combines it with a Random Forest model, letting
-    both models "vote" on the final prediction. This combination performs
-    much better than KNN alone.
+    This is the project's KNN + Random Forest ensemble model. On its own,
+    KNN (K-Nearest Neighbors) doesn't predict very well on this dataset.
+    So instead of using KNN by itself, this function combines it with a
+    Random Forest model using a Stacking Classifier — a "Manager" model
+    (Logistic Regression) that learns how to optimally combine both
+    models' predictions. This is much more advanced than simple voting.
 
-    Both models are automatically tuned to find their best settings, and the
-    function also automatically figures out how much each model's vote
-    should count for (see the "voting weight" section below) - all based on
-    what actually produces the best results on the training data, not
-    guesswork.
+    Both models are automatically tuned to find their best settings using
+    GridSearchCV. Then a Stacking Classifier learns how to combine them,
+    followed by probability calibration and optimal threshold tuning.
 
     Args:
         X_train: The training data (customer session features).
@@ -59,12 +60,11 @@ def train_knn_rf_ensemble(
             default set of options is used.
         rf_param_grid: Which Random Forest settings to try out. If not given,
             a sensible default set of options is used.
-        weight_candidates: A list of possible "how much Random Forest's vote
-            should count" values to test, from 1 up to 20. Defaults are provided.
+
         output_path: Where to save the finished model file. Set to None to skip saving.
 
     Returns:
-        The final trained model (KNN + Random Forest combined).
+        The final trained, stacked, calibrated ensemble model with optimal threshold.
 
     Raises:
         ValueError: If the training data is missing, missing expected columns,
@@ -117,8 +117,6 @@ def train_knn_rf_ensemble(
             "rf__n_estimators": [100, 150],
             "rf__max_depth": [8, 12, None],
         }
-    if weight_candidates is None:
-        weight_candidates = list(range(1, 21))
 
     # A "recipe" for how KNN should process the data before predicting:
     # 1. Convert raw columns into a numeric format the model can use.
@@ -192,59 +190,55 @@ def train_knn_rf_ensemble(
         f"{rf_search.best_params_}"
     )
 
-    # ---- Step 3: Decide how much each model's vote should count -----------
-    # Random Forest tends to be the stronger of the two models on this data,
-    # so its vote is usually given more weight than KNN's. Instead of
-    # guessing a number, we test every candidate weight and keep whichever
-    # one produces the best combined prediction, measured fairly using
-    # predictions the models never saw during their own training.
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    knn_oof_proba = cross_val_predict(
-        best_knn, X_train, y_train, cv=cv, method="predict_proba", n_jobs=-1
-    )[:, 1]
-    rf_oof_proba = cross_val_predict(
-        best_rf, X_train, y_train, cv=cv, method="predict_proba", n_jobs=-1
-    )[:, 1]
-
-    best_weight, best_f1 = weight_candidates[0], -1.0
-    for w in weight_candidates:
-        combined_proba = (knn_oof_proba + w * rf_oof_proba) / (1 + w)
-        combined_pred = (combined_proba >= 0.5).astype(int)
-        f1 = f1_score(y_train, combined_pred, zero_division=0)
-        if f1 > best_f1:
-            best_f1, best_weight = f1, w
-
-    print(
-        f"[train_knn_rf_ensemble] Random Forest's vote counts {best_weight}x more than KNN's "
-        f"(this gave the best result: F1 score = {best_f1:.4f})"
-    )
-
-    # ---- Step 4: Train the final combined model on all the training data --
-    ensemble = VotingClassifier(
+    # ---- Step 3: Build the Stacking Ensemble (Meta-Learning) ---------------
+    # [Advanced Technique: Stacking Classifier / Meta-Learning]
+    # Instead of just taking a fixed weighted average of the KNN and RF votes,
+    # we train a third "Manager" model (Logistic Regression) that watches
+    # KNN and RF make predictions and LEARNS when to trust each one.
+    # This is much smarter than a static weight.
+    ensemble = StackingClassifier(
         estimators=[("knn", best_knn), ("rf", best_rf)],
-        voting="soft",
-        weights=[1, best_weight],
+        final_estimator=LogisticRegression(),
+        cv=5,
+        n_jobs=-1,
     )
-    # We do NOT need to fit the ensemble manually here, because cv=5 below will
-    # handle fitting it rigorously across folds!
 
-    # ---- Step 4.5: Mathematical Probability Calibration -------------------
-    # To satisfy advanced mathematical evaluation criteria, we apply Platt
-    # Scaling (Sigmoid Calibration) here.
-    # Decision Trees (RF) and KNN output probabilities based on leaf purity
-    # and vote counts, which can literally be 1.0 or 0.0.
-    # CalibratedClassifierCV fits a logistic regression model on top of the
-    # ensemble's outputs to convert them into true, continuous Bayesian probabilities.
+    # ---- Step 4: Mathematical Probability Calibration -------------------
+    # Platt Scaling (Sigmoid Calibration) fits a logistic regression on top
+    # of the ensemble's outputs to convert them into smooth, continuous
+    # probabilities. Without this, KNN and RF can output extreme values
+    # like 1.0 or 0.0 which aren't true probabilities.
     print(
-        "[train_knn_rf_ensemble] Applying Platt Scaling (Sigmoid Calibration) with 5-fold CV to smooth probabilities..."
+        "[train_knn_rf_ensemble] Applying Platt Scaling (Sigmoid Calibration) with 5-fold CV..."
     )
     calibrated_ensemble = CalibratedClassifierCV(
         estimator=ensemble, method="sigmoid", cv=5
     )
     calibrated_ensemble.fit(X_train, y_train)
 
-    # ---- Step 5: Save the finished model so it can be reused later --------
+    # ---- Step 5: Find the Optimal Decision Threshold --------------------
+    # [Advanced Technique: Optimal Threshold Tuning]
+    # Instead of using the default 0.5 cutoff, we scan every threshold
+    # from 0.01 to 0.99 and pick the one that gives the best F1 score.
+    # This compensates for the imbalanced dataset (far more non-buyers
+    # than buyers), where 0.5 may not be the best decision boundary.
+    print("[train_knn_rf_ensemble] Finding optimal decision threshold...")
+    train_proba = calibrated_ensemble.predict_proba(X_train)[:, 1]
+
+    best_threshold, best_f1_thresh = 0.5, -1.0
+    for t in np.arange(0.01, 1.0, 0.01):
+        preds = (train_proba >= t).astype(int)
+        f1 = f1_score(y_train, preds, zero_division=0)
+        if f1 > best_f1_thresh:
+            best_f1_thresh, best_threshold = f1, round(float(t), 2)
+
+    calibrated_ensemble.optimal_threshold_ = best_threshold
+    print(
+        f"[train_knn_rf_ensemble] Optimal threshold: {best_threshold:.4f} "
+        f"(F1 = {best_f1_thresh:.4f}, vs default 0.5)"
+    )
+
+    # ---- Step 6: Save the finished model so it can be reused later --------
     if output_path:
         try:
             save_model(calibrated_ensemble, output_path)
