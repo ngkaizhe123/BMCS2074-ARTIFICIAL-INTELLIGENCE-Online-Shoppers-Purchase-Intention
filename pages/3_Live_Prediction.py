@@ -63,6 +63,24 @@ def discover_models():
             try:
                 model = load_model(pkl)
                 nice_name = pkl.stem.replace("_", " ").title()
+                threshold = getattr(model, "optimal_threshold_", None)
+                if threshold is None:
+                    summary_file = (
+                        project_root
+                        / "report_assets"
+                        / "threshold_analysis"
+                        / f"{pkl.stem.split('_')[0]}_threshold_summary.json"
+                    )
+                    if summary_file.exists():
+                        try:
+                            import json
+
+                            with open(summary_file, "r", encoding="utf-8") as sf:
+                                threshold = json.load(sf).get("selected_threshold")
+                        except Exception:
+                            pass
+                if threshold is not None:
+                    model.optimal_threshold_ = float(threshold)
                 models[nice_name] = {"model": model, "stem": pkl.stem}
             except Exception as e:
                 st.warning(f"⚠️ Failed to load `{pkl.name}`: {e}")
@@ -423,11 +441,16 @@ if submitted:
 
     try:
         if prediction_mode == "Single Model":
-            prediction = selected_model.predict(input_data)[0]
+            threshold = getattr(selected_model, "optimal_threshold_", 0.5)
             proba = (
                 selected_model.predict_proba(input_data)[0]
                 if hasattr(selected_model, "predict_proba")
                 else None
+            )
+            prediction = (
+                int(proba[1] >= threshold)
+                if proba is not None
+                else selected_model.predict(input_data)[0]
             )
 
             st.markdown("---")
@@ -475,11 +498,16 @@ if submitted:
             for name, info in models.items():
                 model = info["model"]
                 try:
-                    pred = model.predict(input_data)[0]
+                    threshold = getattr(model, "optimal_threshold_", 0.5)
                     prob = (
                         model.predict_proba(input_data)[0]
                         if hasattr(model, "predict_proba")
                         else None
+                    )
+                    pred = (
+                        int(prob[1] >= threshold)
+                        if prob is not None
+                        else model.predict(input_data)[0]
                     )
                     pur_prob = float(prob[1]) if prob is not None else float(pred)
                     all_results.append(

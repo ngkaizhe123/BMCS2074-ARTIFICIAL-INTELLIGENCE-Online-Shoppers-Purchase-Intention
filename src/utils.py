@@ -46,7 +46,12 @@ def split_dataset(
     test_size: float = 0.2,
     random_state: int = 42,
 ):
-    """Perform a stratified train/test split on the dataset."""
+    """Perform a stratified train/test split on the dataset.
+
+    To prevent data leakage, ensure the same preprocessing is applied
+    consistently across all models and that the test set is never used
+    during training or hyperparameter tuning.
+    """
     X = df.drop(columns=[target]) if target in df.columns else df
     y = df[target].astype(int) if target in df.columns else None
     if y is None:
@@ -99,6 +104,18 @@ def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dic
     tuned and originally reported with, instead of silently re-scoring
     everything at the default 0.5 and producing different numbers than
     what the training script printed and saved to metrics.json.
+    """
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
+
+
+def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
+    """Evaluate a trained model and return a dictionary of evaluation metrics.
+
+    Threshold resolution:
+      1. If `threshold` is passed explicitly, use it.
+      2. Else if the model has an `.optimal_threshold_` attribute, use that.
+      3. Else default to 0.5.
     """
     if threshold is None:
         threshold = getattr(model, "optimal_threshold_", 0.5)
@@ -159,11 +176,13 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
     if hasattr(cm, "tolist"):
         cm = cm.tolist()
 
+    # Standardized schema matching model_visualize.py
     serializable_metrics = {
         "stem": stem,
         "Threshold": (
             float(metrics["Threshold"]) if metrics.get("Threshold") is not None else 0.5
         ),
+        "Threshold": float(metrics.get("Threshold", 0.5)),
         "Accuracy": float(metrics.get("Accuracy", 0.0)),
         "Precision": float(metrics.get("Precision", 0.0)),
         "Recall": float(metrics.get("Recall", 0.0)),
@@ -258,7 +277,11 @@ def generate_shap_explanation(
     is_imblearn_or_sklearn_pipeline = hasattr(model, "named_steps")
 
     if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
+        # Standard Pipeline: pre-transform X_test and explain in feature space
         preprocessor = model.named_steps["preprocessor"]
+        # Keep SHAP aligned with the fitted inference route.  The cleaner is
+        # a row-preserving transformer; any outlier sampler is intentionally
+        # skipped at inference by imblearn Pipeline.
         X_for_preprocessor = (
             model.named_steps["cleaner"].transform(X_test)
             if "cleaner" in model.named_steps
@@ -280,9 +303,11 @@ def generate_shap_explanation(
             or "randomforest" in estimator_name
             or "decisiontree" in estimator_name
         ):
+            # Fast TreeExplainer path
             explainer = shap.TreeExplainer(estimator)
             shap_values = explainer(X_transformed)
         else:
+            # KernelExplainer on already-transformed numpy arrays: safe, no DataFrame needed
             n_bg = min(50, len(X_transformed))
             n_ex = min(100, len(X_transformed))
             idx = np.random.RandomState(42).choice(
@@ -300,20 +325,27 @@ def generate_shap_explanation(
             raw = explainer.shap_values(X_explain)
 
             if isinstance(raw, list) and len(raw) == 2:
+
                 val = raw[1]
+
                 base_val = (
                     explainer.expected_value[1]
                     if isinstance(explainer.expected_value, (list, np.ndarray))
                     else explainer.expected_value
                 )
+
             elif isinstance(raw, np.ndarray) and raw.ndim == 3:
+                print("Detected 3D SHAP output, extracting positive class")
+
                 val = raw[:, :, 1]
                 base_val = (
                     explainer.expected_value[1]
                     if isinstance(explainer.expected_value, (list, np.ndarray))
                     else explainer.expected_value
                 )
+
             else:
+
                 val = raw
                 base_val = explainer.expected_value
 
@@ -330,45 +362,86 @@ def generate_shap_explanation(
             if isinstance(X_test, pd.DataFrame)
             else [f"feature_{i}" for i in range(X_test.shape[1])]
         )
+
         feature_names = col_names
+
         n_bg = min(50, len(X_test))
+
         n_ex = min(100, len(X_test))
+
         background = (
             X_test.sample(n=n_bg, random_state=42)
             if isinstance(X_test, pd.DataFrame)
             else X_test[:n_bg]
         )
+
         X_explain = (
             X_test.iloc[:n_ex] if isinstance(X_test, pd.DataFrame) else X_test[:n_ex]
         )
+
+        # --- Key fix: wrap predict_proba to restore DataFrame column names ---
+
         _base_predict = (
             model.predict_proba if hasattr(model, "predict_proba") else model.predict
         )
 
         def _predict_with_df(data):
+            """Always convert input to a DataFrame with correct column names."""
+
             if not isinstance(data, pd.DataFrame):
+
                 data = pd.DataFrame(data, columns=col_names)
+
             return _base_predict(data)
 
         explainer = shap.KernelExplainer(_predict_with_df, background)
+
         raw = explainer.shap_values(X_explain)
 
+        print("RAW TYPE:", type(raw))
+
+        if isinstance(raw, np.ndarray):
+
+            print("RAW SHAPE:", raw.shape)
+
+        elif isinstance(raw, list):
+
+            print("LIST LENGTH:", len(raw))
+
+            for i, arr in enumerate(raw):
+
+                print(f"class {i} shape:", np.array(arr).shape)
+
+        # -------------------------------------------------------------
+
         if isinstance(raw, list) and len(raw) == 2:
+
             val = raw[1]
+
             base_val = (
                 explainer.expected_value[1]
                 if isinstance(explainer.expected_value, (list, np.ndarray))
                 else explainer.expected_value
             )
+
         elif isinstance(raw, np.ndarray) and raw.ndim == 3:
+
+            print(
+                "[SHAP] Detected 3D SHAP output (samples, features, classes), extracting positive class (Class 1)"
+            )
+
             val = raw[:, :, 1]
+
             base_val = (
                 explainer.expected_value[1]
                 if isinstance(explainer.expected_value, (list, np.ndarray))
                 else explainer.expected_value
             )
+
         else:
+
             val = raw
+
             base_val = explainer.expected_value
 
         data_array = (
@@ -403,6 +476,7 @@ def generate_shap_explanation(
 
     model_label = prefix.rstrip("_").upper() if prefix else estimator.__class__.__name__
 
+    # Plot 1: Beeswarm Plot
     fig_bee = plt.figure(figsize=(10, 6))
     shap.plots.beeswarm(shap_values, max_display=max_display, show=False)
     plt.title(f"SHAP Beeswarm Plot ({model_label})", fontsize=13, fontweight="bold")
@@ -410,6 +484,7 @@ def generate_shap_explanation(
     _save_or_show(fig_bee, "shap_beeswarm.png")
     figures["beeswarm"] = fig_bee
 
+    # Plot 2: Bar Plot (Importance)
     fig_bar = plt.figure(figsize=(10, 6))
     shap.plots.bar(shap_values, max_display=max_display, show=False)
     plt.title(
@@ -419,6 +494,9 @@ def generate_shap_explanation(
     _save_or_show(fig_bar, "shap_feature_importance.png")
     figures["bar"] = fig_bar
 
+    # Plot 3: Single Sample Waterfall Plot
+    # shap.plots.waterfall() creates its own figure internally;
+    # use plt.gcf() to retrieve it after the call.
     shap.plots.waterfall(shap_values[0], max_display=min(10, max_display), show=False)
     fig_waterfall = plt.gcf()
     fig_waterfall.set_size_inches(10, 6)

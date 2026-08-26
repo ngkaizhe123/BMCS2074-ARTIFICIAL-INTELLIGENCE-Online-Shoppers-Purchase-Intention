@@ -65,6 +65,7 @@ for name, metrics in all_metrics.items():
     results.append(
         {
             "Model": name,
+            "Threshold": metrics.get("Threshold", 0.5),
             "Accuracy": metrics.get("Accuracy", 0.0),
             "Precision": metrics.get("Precision", 0.0),
             "Recall": metrics.get("Recall", 0.0),
