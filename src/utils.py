@@ -108,6 +108,7 @@ def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dic
     if threshold is None:
         threshold = getattr(model, "optimal_threshold_", 0.5)
 
+
 def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
     """Evaluate a trained model and return a dictionary of evaluation metrics.
 
