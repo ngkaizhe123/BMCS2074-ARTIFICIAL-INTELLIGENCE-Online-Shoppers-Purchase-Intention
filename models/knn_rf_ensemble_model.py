@@ -54,9 +54,13 @@ def evaluate_with_nested_cv(X, y, n_trials=5, outer_splits=3, inner_splits=3):
     Previously this parameter was accepted but silently ignored, so changing
     it had no effect on the inner tuning loop.
     """
-    print(f"\n[Nested CV] Starting {outer_splits}x{inner_splits} Nested Cross-Validation...")
+    print(
+        f"\n[Nested CV] Starting {outer_splits}x{inner_splits} Nested Cross-Validation..."
+    )
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    outer_cv = StratifiedKFold(n_splits=outer_splits, shuffle=True, random_state=RANDOM_STATE)
+    outer_cv = StratifiedKFold(
+        n_splits=outer_splits, shuffle=True, random_state=RANDOM_STATE
+    )
     outer_scores = []
 
     for fold, (train_idx, test_idx) in enumerate(outer_cv.split(X, y)):
@@ -81,7 +85,9 @@ def evaluate_with_nested_cv(X, y, n_trials=5, outer_splits=3, inner_splits=3):
 
     mean_score = np.mean(outer_scores)
     std_score = np.std(outer_scores)
-    print(f"[Nested CV] Completed. Unbiased F1 Score: {mean_score:.4f} \u00b1 {std_score:.4f}\n")
+    print(
+        f"[Nested CV] Completed. Unbiased F1 Score: {mean_score:.4f} \u00b1 {std_score:.4f}\n"
+    )
     return mean_score
 
 
@@ -113,9 +119,13 @@ def train_knn_rf_ensemble(
         The final trained, stacked, and calibrated ensemble model.
     """
     if X_train is None or len(X_train) == 0:
-        raise ValueError("[train_knn_rf_ensemble] X_train is empty — cannot train on no data.")
+        raise ValueError(
+            "[train_knn_rf_ensemble] X_train is empty — cannot train on no data."
+        )
     if y_train is None or y_train.nunique() < 2:
-        raise ValueError("[train_knn_rf_ensemble] y_train must contain at least 2 classes.")
+        raise ValueError(
+            "[train_knn_rf_ensemble] y_train must contain at least 2 classes."
+        )
 
     expected_columns = CATEGORICAL_FEATURES + NUMERICAL_FEATURES
     missing_columns = [col for col in expected_columns if col not in X_train.columns]
@@ -125,7 +135,9 @@ def train_knn_rf_ensemble(
         )
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    inner_cv = StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=RANDOM_STATE)
+    inner_cv = StratifiedKFold(
+        n_splits=inner_splits, shuffle=True, random_state=RANDOM_STATE
+    )
 
     # ---- Step 1: Optimize KNN Pipeline with PCA using Optuna -----------------
     # [Advanced Technique 2: Bayesian Optimization (Optuna)]
@@ -145,10 +157,15 @@ def train_knn_rf_ensemble(
                 # KNN gets very confused when there are too many columns ("Curse of Dimensionality").
                 # PCA solves this by compressing the columns down into the most mathematically important summaries.
                 ("pca", PCA(n_components=n_components, random_state=RANDOM_STATE)),
-                ("knn", KNeighborsClassifier(n_neighbors=n_neighbors, weights=weights, p=p)),
+                (
+                    "knn",
+                    KNeighborsClassifier(n_neighbors=n_neighbors, weights=weights, p=p),
+                ),
             ]
         )
-        scores = cross_val_score(pipeline, X_train, y_train, cv=inner_cv, scoring="f1", n_jobs=-1)
+        scores = cross_val_score(
+            pipeline, X_train, y_train, cv=inner_cv, scoring="f1", n_jobs=-1
+        )
         return scores.mean()
 
     # ---- Step 2: Optimize Random Forest using Optuna -------------------------
@@ -160,15 +177,20 @@ def train_knn_rf_ensemble(
             steps=[
                 ("preprocessor", build_preprocessor(scale_numerical=True)),
                 ("smote", get_smote()),
-                ("rf", RandomForestClassifier(
-                    n_estimators=n_estimators,
-                    max_depth=max_depth,
-                    random_state=RANDOM_STATE,
-                    n_jobs=-1
-                )),
+                (
+                    "rf",
+                    RandomForestClassifier(
+                        n_estimators=n_estimators,
+                        max_depth=max_depth,
+                        random_state=RANDOM_STATE,
+                        n_jobs=-1,
+                    ),
+                ),
             ]
         )
-        scores = cross_val_score(pipeline, X_train, y_train, cv=inner_cv, scoring="f1", n_jobs=-1)
+        scores = cross_val_score(
+            pipeline, X_train, y_train, cv=inner_cv, scoring="f1", n_jobs=-1
+        )
         return scores.mean()
 
     # FIX: both studies now use a seeded TPESampler, matching the random_state=42
@@ -195,7 +217,9 @@ def train_knn_rf_ensemble(
     )
     knn_study = optuna.create_study(
         direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE, n_startup_trials=n_startup_trials),
+        sampler=optuna.samplers.TPESampler(
+            seed=RANDOM_STATE, n_startup_trials=n_startup_trials
+        ),
     )
     knn_study.optimize(objective_knn, n_trials=n_trials)
     print(f"[train_knn_rf_ensemble] Best KNN settings: {knn_study.best_params}")
@@ -207,7 +231,9 @@ def train_knn_rf_ensemble(
     )
     rf_study = optuna.create_study(
         direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE, n_startup_trials=n_startup_trials),
+        sampler=optuna.samplers.TPESampler(
+            seed=RANDOM_STATE, n_startup_trials=n_startup_trials
+        ),
     )
     rf_study.optimize(objective_rf, n_trials=n_trials)
     print(f"[train_knn_rf_ensemble] Best RF settings: {rf_study.best_params}")
@@ -225,12 +251,21 @@ def train_knn_rf_ensemble(
         steps=[
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
-            ("pca", PCA(n_components=knn_study.best_params["pca__n_components"], random_state=RANDOM_STATE)),
-            ("knn", KNeighborsClassifier(
-                n_neighbors=knn_study.best_params["n_neighbors"],
-                weights=knn_study.best_params["weights"],
-                p=knn_study.best_params["p"],
-            )),
+            (
+                "pca",
+                PCA(
+                    n_components=knn_study.best_params["pca__n_components"],
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            (
+                "knn",
+                KNeighborsClassifier(
+                    n_neighbors=knn_study.best_params["n_neighbors"],
+                    weights=knn_study.best_params["weights"],
+                    p=knn_study.best_params["p"],
+                ),
+            ),
         ]
     )
 
@@ -238,12 +273,15 @@ def train_knn_rf_ensemble(
         steps=[
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
-            ("rf", RandomForestClassifier(
-                n_estimators=rf_study.best_params["n_estimators"],
-                max_depth=rf_study.best_params["max_depth"],
-                random_state=RANDOM_STATE,
-                n_jobs=-1
-            )),
+            (
+                "rf",
+                RandomForestClassifier(
+                    n_estimators=rf_study.best_params["n_estimators"],
+                    max_depth=rf_study.best_params["max_depth"],
+                    random_state=RANDOM_STATE,
+                    n_jobs=-1,
+                ),
+            ),
         ]
     )
 
@@ -272,7 +310,9 @@ def train_knn_rf_ensemble(
         try:
             save_model(calibrated_ensemble, output_path)
         except Exception as e:
-            print(f"[train_knn_rf_ensemble] Warning: failed to save model to {output_path}: {e}")
+            print(
+                f"[train_knn_rf_ensemble] Warning: failed to save model to {output_path}: {e}"
+            )
 
     return calibrated_ensemble
 
@@ -290,7 +330,9 @@ if __name__ == "__main__":
     print("\n========================================================")
     print("PHASE 1: RIGOROUS NESTED CROSS-VALIDATION EVALUATION")
     print("========================================================")
-    evaluate_with_nested_cv(X_train, y_train, n_trials=8, outer_splits=3, inner_splits=3)
+    evaluate_with_nested_cv(
+        X_train, y_train, n_trials=8, outer_splits=3, inner_splits=3
+    )
 
     # 2. Train the Final Production Model on the full training set
     # FIX: raised from n_trials=10 to n_trials=20, so this study runs a genuine
@@ -300,7 +342,10 @@ if __name__ == "__main__":
     print("PHASE 2: TRAINING FINAL PRODUCTION STACKING ENSEMBLE")
     print("========================================================")
     model = train_knn_rf_ensemble(
-        X_train, y_train, n_trials=20, output_path="saved_models/knn_rf_ensemble_model.pkl"
+        X_train,
+        y_train,
+        n_trials=20,
+        output_path="saved_models/knn_rf_ensemble_model.pkl",
     )
 
     print("\n========================================================")
