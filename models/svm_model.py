@@ -29,7 +29,6 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-import joblib
 import json
 import numpy as np
 import pandas as pd
@@ -60,12 +59,10 @@ from sklearn.model_selection import (
 from sklearn.svm import SVC
 
 from src.data_preprocessing import (
-    CATEGORICAL_FEATURES,
     NUMERICAL_FEATURES,
-    TrainFittedDataCleaner,
-    TrainingOutlierFilter,
     build_preprocessor,
     preprocess_data,
+    remove_outliers_iqr_train,
 )
 from src.utils import (
     generate_shap_explanation,
@@ -160,11 +157,6 @@ def _build_pipeline_with_smotenc(
 ) -> Pipeline:
     """Build TrainFittedDataCleaner -> (OutlierFilter) -> Preprocessor -> SMOTENC -> SVC pipeline."""
     steps = [
-        ("cleaner", TrainFittedDataCleaner()),
-    ]
-    if outlier_method != "none":
-        steps.append(("outlier_filter", TrainingOutlierFilter(method=outlier_method)))
-    steps += [
         ("preprocessor", build_preprocessor(scale_numerical=True)),
         (
             "smotenc",
@@ -183,7 +175,9 @@ def _build_pipeline_with_smotenc(
             ),
         ),
     ]
-    return Pipeline(steps=steps)
+
+    pipeline_smotenc = Pipeline(steps=steps)
+    return pipeline_smotenc
 
 
 def _build_pipeline_no_smote(
@@ -192,11 +186,6 @@ def _build_pipeline_no_smote(
 ) -> Pipeline:
     """Build TrainFittedDataCleaner -> (OutlierFilter) -> Preprocessor -> SVC pipeline (class_weight only)."""
     steps = [
-        ("cleaner", TrainFittedDataCleaner()),
-    ]
-    if outlier_method != "none":
-        steps.append(("outlier_filter", TrainingOutlierFilter(method=outlier_method)))
-    steps += [
         ("preprocessor", build_preprocessor(scale_numerical=True)),
         (
             "svm",
@@ -208,7 +197,9 @@ def _build_pipeline_no_smote(
             ),
         ),
     ]
-    return Pipeline(steps=steps)
+
+    pipeline_no_smote = Pipeline(steps=steps)
+    return pipeline_no_smote
 
 
 # ---------------------------------------------------------------------------
@@ -585,11 +576,10 @@ def train_svm(
     # interpolated).
     # We fit a standalone cleaner + preprocessor probe on training data to
     # count the OHE output columns correctly.
-    _probe_cleaner = TrainFittedDataCleaner()
-    X_train_cleaned = _probe_cleaner.fit_transform(X_train)
+    X_train_clean, y_train_clean = remove_outliers_iqr_train(X_train, y_train)
     _probe_pp = build_preprocessor(scale_numerical=True)
-    _probe_pp.fit(X_train_cleaned)
-    _n_total_transformed = _probe_pp.transform(X_train_cleaned.iloc[:1]).shape[1]
+    _probe_pp.fit(X_train_clean)
+    _n_total_transformed = _probe_pp.transform(X_train_clean.iloc[:1]).shape[1]
     _n_num = len(NUMERICAL_FEATURES)
     _n_ohe_cols = _n_total_transformed - _n_num
     smotenc_cat_idx = list(range(_n_ohe_cols))  # first N cols = OHE block
@@ -621,7 +611,7 @@ def train_svm(
         refit=True,
         error_score="raise",
     )
-    search_smotenc.fit(X_train, y_train)
+    search_smotenc.fit(X_train_clean, y_train_clean)
     print(
         f"[train_svm] Strategy A+C | best {scoring}: {search_smotenc.best_score_:.4f}"
     )
@@ -648,7 +638,7 @@ def train_svm(
         refit=True,
         error_score="raise",
     )
-    search_no_smote.fit(X_train, y_train)
+    search_no_smote.fit(X_train_clean, y_train_clean)
     print(
         f"[train_svm] Strategy B    | best {scoring}: {search_no_smote.best_score_:.4f}"
     )
@@ -686,7 +676,7 @@ def train_svm(
         ensemble=False,
         cv=5,
     )
-    calibrated_model.fit(X_train, y_train)
+    calibrated_model.fit(X_train_clean, y_train_clean)
 
     # ── Convergence guard ────────────────────────────────────────────────────
     try:
@@ -713,8 +703,8 @@ def train_svm(
     # for test-set prediction — both go through the same single calibration.
     optimal_threshold, threshold_results_df = find_optimal_threshold_oof(
         raw_pipeline=calibrated_model,
-        X_train=X_train,
-        y_train=np.asarray(y_train),
+        X_train=X_train_clean,
+        y_train=np.asarray(y_train_clean),
         thresholds=np.arange(0.10, 0.81, 0.01),
         cv=oof_cv,
         random_state=random_state,

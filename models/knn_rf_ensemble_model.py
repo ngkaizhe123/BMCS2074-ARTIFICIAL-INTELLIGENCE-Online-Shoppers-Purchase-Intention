@@ -20,8 +20,7 @@ from src.data_preprocessing import (
     build_preprocessor,
     get_smote,
     preprocess_data,
-    TrainFittedDataCleaner,
-    TrainingOutlierFilter,
+    remove_outliers_iqr_train,
 )
 from src.utils import (
     evaluate_model,
@@ -127,8 +126,6 @@ def train_knn_rf_ensemble(
     # 3. Run the KNN model itself.
     knn_pipeline_template = Pipeline(
         steps=[
-            ("iqr", TrainingOutlierFilter(method="iqr")),
-            ("cleaner", TrainFittedDataCleaner()),
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
             ("knn", KNeighborsClassifier()),
@@ -138,13 +135,14 @@ def train_knn_rf_ensemble(
     # Same idea, but for Random Forest.
     rf_pipeline_template = Pipeline(
         steps=[
-            ("iqr", TrainingOutlierFilter(method="iqr")),
-            ("cleaner", TrainFittedDataCleaner()),
             ("preprocessor", build_preprocessor(scale_numerical=True)),
             ("smote", get_smote()),
             ("rf", RandomForestClassifier(random_state=42, n_jobs=-1)),
         ]
     )
+
+    # Outlier handle
+    X_train, y_train = remove_outliers_iqr_train(X_train, y_train)
 
     # ---- Step 1: Find the best settings for KNN --------------------------
     # This tries every combination in knn_param_grid and keeps whichever
@@ -165,13 +163,10 @@ def train_knn_rf_ensemble(
         ) from e
 
     best_knn = knn_search.best_estimator_
-    knn_iqr = best_knn.named_steps["iqr"]
+
     print(
-        f"[train_knn_rf_ensemble] KNN training rows before/after IQR: "
-        f"{knn_iqr.n_samples_before_} -> {knn_iqr.n_samples_after_}"
-    )
-    print(
-        f"\n[train_knn_rf_ensemble] Best KNN settings found: {knn_search.best_params_}"
+        f"[train_knn_rf_ensemble] Best KNN settings found: "
+        f"{knn_search.best_params_}"
     )
 
     # ---- Step 2: Find the best settings for Random Forest -----------------
@@ -191,13 +186,10 @@ def train_knn_rf_ensemble(
         ) from e
 
     best_rf = rf_search.best_estimator_
-    rf_iqr = best_rf.named_steps["iqr"]
+
     print(
-        f"[train_knn_rf_ensemble] RF training rows before/after IQR: "
-        f"{rf_iqr.n_samples_before_} -> {rf_iqr.n_samples_after_}"
-    )
-    print(
-        f"[train_knn_rf_ensemble] Best Random Forest settings found: {rf_search.best_params_}"
+        f"[train_knn_rf_ensemble] Best Random Forest settings found: "
+        f"{rf_search.best_params_}"
     )
 
     # ---- Step 3: Decide how much each model's vote should count -----------

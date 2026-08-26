@@ -36,10 +36,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
-from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -162,15 +160,98 @@ def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     return df_clean
 
 
-# ---------------------------------------------------------------------------
-# Step 4 – Remove Outliers  (handled by TrainingOutlierFilter inside Pipeline)
-# ---------------------------------------------------------------------------
+def handle_missing_value(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Handle missing values if any are present.
+
+    The Online Shoppers Intention dataset is expected to contain
+    no missing values. Therefore, this function first checks for
+    missing values and only performs imputation when necessary.
+
+    Numerical features:
+        → median imputation
+
+    Categorical features:
+        → mode imputation
+    """
+    df = df.copy()
+
+    missing_count = df.isnull().sum().sum()
+
+    if missing_count == 0:
+        print("[handle_missing_value] No missing values found.")
+        return df
+
+    print(
+        f"[handle_missing_value] {missing_count} missing values found. "
+        "Applying imputation..."
+    )
+
+    # Numerical columns → median
+    for col in NUMERICAL_FEATURES:
+        if col in df.columns and df[col].isnull().any():
+            median_value = df[col].median()
+            df[col] = df[col].fillna(median_value)
+
+    # Categorical columns → mode
+    for col in CATEGORICAL_FEATURES:
+        if col in df.columns and df[col].isnull().any():
+            mode = df[col].mode()
+
+            if not mode.empty:
+                df[col] = df[col].fillna(mode.iloc[0])
+
+    remaining_missing = df.isnull().sum().sum()
+
+    if remaining_missing == 0:
+        print("[handle_missing_value] All missing values handled.")
+    else:
+        print(
+            f"[handle_missing_value] Warning: "
+            f"{remaining_missing} missing values remain."
+        )
+
+    return df
 
 
-# Outlier removal is handled exclusively by TrainingOutlierFilter (see below),
-# which is an imblearn sampler fitted inside the model pipeline on training
-# data only.  Standalone IQR/Z-score functions were removed to prevent
-# accidental pre-split leakage.
+# ---------------------------------------------------------------------------
+# Step 4 – Remove Outliers
+# ---------------------------------------------------------------------------
+def remove_outliers_iqr_train(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    columns: list[str] | None = None,
+    factor: float = 1.5,
+):
+    columns = columns or CONTINUOUS_FEATURES_FOR_OUTLIERS
+
+    mask = pd.Series(True, index=X_train.index)
+
+    for col in columns:
+        if col not in X_train.columns:
+            continue
+
+        q1 = X_train[col].quantile(0.25)
+        q3 = X_train[col].quantile(0.75)
+        iqr = q3 - q1
+
+        if iqr == 0:
+            continue
+
+        lower = q1 - factor * iqr
+        upper = q3 + factor * iqr
+
+        mask &= X_train[col].between(lower, upper)
+
+    X_train_clean = X_train.loc[mask].copy()
+    y_train_clean = y_train.loc[mask].copy()
+
+    print(
+        f"[remove_outliers_iqr_train] "
+        f"Rows: {len(X_train):,} -> {len(X_train_clean):,}"
+    )
+
+    return X_train_clean, y_train_clean
 
 
 # ---------------------------------------------------------------------------
@@ -423,130 +504,10 @@ def prepare_dataset_for_split(df: pd.DataFrame) -> pd.DataFrame:
     df = cap_duration_outliers(df)
     df = clip_rates(df)
     df = drop_special_day(df)
+    df = handle_missing_value(df)
     df = encode_target(df)
     print(f"[prepare_dataset_for_split] Done. Output shape: {df.shape}\n")
     return df
-
-
-class TrainFittedDataCleaner(BaseEstimator, TransformerMixin):
-    """Data-dependent cleaning fitted on a training partition only.
-
-    The transformer learns imputation values, duration medians, categorical
-    replacement modes, and rare-category maps in ``fit``.  ``transform``
-    applies those already-fitted values to either training or test data and
-    never removes rows.
-    """
-
-    def __init__(self, rare_threshold: int = 10):
-        self.rare_threshold = rare_threshold
-
-    def fit(self, X, y=None):
-        X = X.copy()
-        self.numeric_medians_ = {
-            c: X[c].median() for c in NUMERICAL_FEATURES if c in X.columns
-        }
-        self.categorical_modes_ = {
-            c: X[c].mode().iloc[0]
-            for c in CATEGORICAL_FEATURES
-            if c in X.columns and not X[c].mode().empty
-        }
-        self.nonzero_duration_medians_ = {}
-        for pages_col, dur_col in PAGE_DURATION_PAIRS:
-            if pages_col in X.columns and dur_col in X.columns:
-                values = X.loc[X[dur_col] > 0, dur_col]
-                self.nonzero_duration_medians_[dur_col] = (
-                    values.median() if not values.empty else 0.0
-                )
-        self.rare_categories_ = {}
-        for col in ["OperatingSystems", "Browser", "TrafficType", "Region"]:
-            if col in X.columns:
-                counts = X[col].astype(str).value_counts()
-                self.rare_categories_[col] = set(
-                    counts[counts < self.rare_threshold].index
-                )
-        return self
-
-    def transform(self, X):
-        X = X.copy()
-        for col, value in self.numeric_medians_.items():
-            if col in X.columns:
-                X[col] = X[col].fillna(value)
-        for col, value in self.categorical_modes_.items():
-            if col in X.columns:
-                X[col] = X[col].fillna(value)
-
-        for pages_col, dur_col in PAGE_DURATION_PAIRS:
-            if pages_col not in X.columns or dur_col not in X.columns:
-                continue
-            X.loc[(X[pages_col] == 0) & (X[dur_col] > 0), dur_col] = 0
-            missing_duration = (X[pages_col] > 0) & (X[dur_col] == 0)
-            fallback = self.nonzero_duration_medians_.get(dur_col, 0.0)
-            X.loc[missing_duration, dur_col] = fallback
-
-        valid_sets = {"Month": VALID_MONTHS, "VisitorType": VALID_VISITOR_TYPES}
-        for col, valid in valid_sets.items():
-            if col in X.columns:
-                invalid = ~X[col].isin(valid)
-                if invalid.any():
-                    X.loc[invalid, col] = self.categorical_modes_[col]
-        if "Weekend" in X.columns:
-            X["Weekend"] = X["Weekend"].astype(bool)
-
-        for col, rare_values in self.rare_categories_.items():
-            if col in X.columns:
-                X[col] = X[col].astype(str)
-                X.loc[X[col].isin(rare_values), col] = f"Other_{col}"
-        return X
-
-
-class TrainingOutlierFilter(BaseEstimator):
-    """imblearn sampler that removes rows only while a pipeline is fitted.
-
-    Its ``fit_resample`` learns bounds and returns filtered training rows.
-    imblearn deliberately skips samplers during ``predict``/``predict_proba``;
-    test observations therefore cannot be removed.
-    """
-
-    def __init__(
-        self,
-        method: str = "iqr",
-        columns=None,
-        factor: float = 1.5,
-        threshold: float = 3.0,
-    ):
-        self.method = method
-        self.columns = columns
-        self.factor = factor
-        self.threshold = threshold
-
-    def fit_resample(self, X, y):
-        if self.method not in {"iqr", "zscore"}:
-            raise ValueError("method must be 'iqr' or 'zscore'")
-        columns = self.columns or CONTINUOUS_FEATURES_FOR_OUTLIERS
-        self.columns_ = [c for c in columns if c in X.columns]
-        mask = pd.Series(True, index=X.index)
-        self.bounds_ = {}
-        for col in self.columns_:
-            if self.method == "iqr":
-                q1, q3 = X[col].quantile(0.25), X[col].quantile(0.75)
-                spread = q3 - q1
-                if spread == 0:
-                    continue
-                lower, upper = q1 - self.factor * spread, q3 + self.factor * spread
-                self.bounds_[col] = (lower, upper)
-                mask &= X[col].between(lower, upper)
-            else:
-                mean, std = X[col].mean(), X[col].std()
-                if std == 0 or pd.isna(std):
-                    continue
-                self.bounds_[col] = (mean, std)
-                mask &= (X[col] - mean).abs() < self.threshold * std
-        self.n_samples_before_ = len(X)
-        self.n_samples_after_ = int(mask.sum())
-        self.n_samples_removed_ = self.n_samples_before_ - self.n_samples_after_
-        return X.loc[mask], (
-            y.loc[mask] if hasattr(y, "loc") else np.asarray(y)[mask.to_numpy()]
-        )
 
 
 def run_preprocessing_pipeline(
