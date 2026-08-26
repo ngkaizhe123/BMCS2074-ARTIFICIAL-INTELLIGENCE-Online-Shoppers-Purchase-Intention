@@ -46,12 +46,7 @@ def split_dataset(
     test_size: float = 0.2,
     random_state: int = 42,
 ):
-    """Perform a stratified train/test split on the dataset.
-
-    To prevent data leakage, ensure the same preprocessing is applied
-    consistently across all models and that the test set is never used
-    during training or hyperparameter tuning.
-    """
+    """Perform a stratified train/test split on the dataset."""
     X = df.drop(columns=[target]) if target in df.columns else df
     y = df[target].astype(int) if target in df.columns else None
     if y is None:
@@ -78,10 +73,7 @@ def save_cleaned_dataset(
     df: pd.DataFrame,
     filepath: str | Path = "data/processed/cleaned_online_shoppers_intention.csv",
 ) -> None:
-    """
-    Save the cleaned dataset to a single CSV file.
-    Creates parent directories if they do not exist.
-    """
+    """Save the cleaned dataset to a single CSV file."""
     path = Path(filepath)
     path.parent.mkdir(exist_ok=True, parents=True)
     df.to_csv(path, index=False)
@@ -90,14 +82,38 @@ def save_cleaned_dataset(
     )
 
 
-def evaluate_model(model, X_test, y_test) -> dict:
-    """Evaluate a trained model and return a dictionary of evaluation metrics."""
-    y_pred = model.predict(X_test)
+def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
+    """Evaluate a trained model and return a dictionary of evaluation metrics.
+
+    Decision threshold resolution (this is the fix for the
+    terminal-vs-metrics.json mismatch):
+      1. If `threshold` is passed explicitly, use it.
+      2. Else if the model itself has an `.optimal_threshold_` attribute
+         (set by a training script right before save_model(), e.g.
+         svm_model.py after its OOF threshold scan), use that.
+      3. Else fall back to 0.5 (equivalent to plain model.predict()).
+
+    Why this matters: re-evaluating a saved model later (e.g. from
+    model_visualize.py, after the process that trained it has already
+    exited) now automatically uses the SAME threshold the model was
+    tuned and originally reported with, instead of silently re-scoring
+    everything at the default 0.5 and producing different numbers than
+    what the training script printed and saved to metrics.json.
+    """
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
+
     y_prob = (
         model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
     )
+    y_pred = (
+        (y_prob >= threshold).astype(int)
+        if y_prob is not None
+        else model.predict(X_test)
+    )
 
     metrics = {
+        "Threshold": threshold,
         "Accuracy": accuracy_score(y_test, y_pred),
         "Precision": precision_score(y_test, y_pred, zero_division=0),
         "Recall": recall_score(y_test, y_pred, zero_division=0),
@@ -115,6 +131,8 @@ def print_metrics(model_name: str, metrics: dict) -> None:
     print("=" * 50)
     print(f" Model Evaluation Metrics: {model_name}")
     print("=" * 50)
+    if metrics.get("Threshold") is not None:
+        print(f"Threshold: {metrics['Threshold']:.4f}")
     print(f"Accuracy : {metrics['Accuracy']:.4f}")
     print(f"Precision: {metrics['Precision']:.4f}")
     print(f"Recall   : {metrics['Recall']:.4f}")
@@ -130,16 +148,22 @@ def print_metrics(model_name: str, metrics: dict) -> None:
 
 
 def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
-    """Persist a model's metrics dict to the shared metrics.json file with a standardized schema."""
+    """Persist a model's metrics dict to the shared metrics.json file.
+
+    Reads the existing file, updates only this model_name's entry, and
+    writes the merged result back -- other models' entries are preserved.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cm = metrics.get("Confusion Matrix")
     if hasattr(cm, "tolist"):
         cm = cm.tolist()
 
-    # Standardized 8-key schema matching model_visualize.py
     serializable_metrics = {
         "stem": stem,
+        "Threshold": (
+            float(metrics["Threshold"]) if metrics.get("Threshold") is not None else 0.5
+        ),
         "Accuracy": float(metrics.get("Accuracy", 0.0)),
         "Precision": float(metrics.get("Precision", 0.0)),
         "Recall": float(metrics.get("Recall", 0.0)),
@@ -166,9 +190,14 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
     print(f"Metrics for {model_name} saved to {output_path}")
 
 
-def plot_confusion_matrix(model, X_test, y_test):
-    """Plot confusion matrix chart."""
-    predictions = model.predict(X_test)
+def plot_confusion_matrix(model, X_test, y_test, threshold: float | None = None):
+    """Plot confusion matrix chart, using the model's tuned threshold if set."""
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
+    if hasattr(model, "predict_proba"):
+        predictions = (model.predict_proba(X_test)[:, 1] >= threshold).astype(int)
+    else:
+        predictions = model.predict(X_test)
     cm = confusion_matrix(y_test, predictions)
 
     display = ConfusionMatrixDisplay(confusion_matrix=cm)
@@ -179,7 +208,7 @@ def plot_confusion_matrix(model, X_test, y_test):
 
 
 def plot_roc_curve(model, X_test, y_test):
-    """Plot ROC curve chart."""
+    """Plot ROC curve chart. ROC-AUC is threshold-independent."""
     probabilities = model.predict_proba(X_test)[:, 1]
 
     fpr, tpr, _ = roc_curve(y_test, probabilities)
@@ -200,15 +229,7 @@ def plot_roc_curve(model, X_test, y_test):
 
 
 def save_model(model, output_path: str | Path, compress: int = 3) -> None:
-    """Save trained model/pipeline to file, creating parent directories if needed.
-
-    Args:
-        model: The trained model or pipeline to save.
-        output_path: Destination file path for the .pkl file.
-        compress: joblib compression level 0-9 (0 = none, 3 = good balance of
-            size vs speed, 9 = maximum compression). Defaults to 3, which
-            typically reduces file size by 3-5x with negligible load overhead.
-    """
+    """Save trained model/pipeline to file, creating parent directories if needed."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, path, compress=compress)
@@ -233,35 +254,11 @@ def generate_shap_explanation(
     prefix: str = "",
     show: bool = True,
 ):
-    """
-    Generate SHAP plots (Beeswarm, Feature Importance Bar, Waterfall) for a trained Pipeline or Model.
-
-    Parameters
-    ----------
-    model : Trained Pipeline or Estimator.
-    X_test : pandas DataFrame of raw testing features.
-    max_display : Maximum number of top features to display in plots.
-    save_dir : Directory path to save PNG figures (optional).
-    prefix : Optional filename prefix (e.g., 'xgboost_', 'knn_', 'svm_').
-    show : Whether to call plt.show() for figures.
-
-    Returns
-    -------
-    (explainer, shap_values, figures_dict)
-    """
-
-    # 1. Determine if the model contains ColumnTransformers that need
-    #    DataFrame column names (e.g. VotingClassifier with sub-Pipelines).
-    #    KernelExplainer internally converts all data to numpy arrays before
-    #    calling predict_proba, so we wrap predict_fn to restore column names.
+    """Generate SHAP plots (Beeswarm, Feature Importance Bar, Waterfall) for a trained Pipeline or Model."""
     is_imblearn_or_sklearn_pipeline = hasattr(model, "named_steps")
 
     if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
-        # Standard Pipeline: pre-transform X_test and explain in feature space
         preprocessor = model.named_steps["preprocessor"]
-        # Keep SHAP aligned with the fitted inference route.  The cleaner is
-        # a row-preserving transformer; any outlier sampler is intentionally
-        # skipped at inference by imblearn Pipeline.
         X_for_preprocessor = (
             model.named_steps["cleaner"].transform(X_test)
             if "cleaner" in model.named_steps
@@ -283,11 +280,9 @@ def generate_shap_explanation(
             or "randomforest" in estimator_name
             or "decisiontree" in estimator_name
         ):
-            # Fast TreeExplainer path
             explainer = shap.TreeExplainer(estimator)
             shap_values = explainer(X_transformed)
         else:
-            # KernelExplainer on already-transformed numpy arrays: safe, no DataFrame needed
             n_bg = min(50, len(X_transformed))
             n_ex = min(100, len(X_transformed))
             idx = np.random.RandomState(42).choice(
@@ -305,27 +300,20 @@ def generate_shap_explanation(
             raw = explainer.shap_values(X_explain)
 
             if isinstance(raw, list) and len(raw) == 2:
-
                 val = raw[1]
-
                 base_val = (
                     explainer.expected_value[1]
                     if isinstance(explainer.expected_value, (list, np.ndarray))
                     else explainer.expected_value
                 )
-
             elif isinstance(raw, np.ndarray) and raw.ndim == 3:
-                print("Detected 3D SHAP output, extracting positive class")
-
                 val = raw[:, :, 1]
                 base_val = (
                     explainer.expected_value[1]
                     if isinstance(explainer.expected_value, (list, np.ndarray))
                     else explainer.expected_value
                 )
-
             else:
-
                 val = raw
                 base_val = explainer.expected_value
 
@@ -342,86 +330,45 @@ def generate_shap_explanation(
             if isinstance(X_test, pd.DataFrame)
             else [f"feature_{i}" for i in range(X_test.shape[1])]
         )
-
         feature_names = col_names
-
         n_bg = min(50, len(X_test))
-
         n_ex = min(100, len(X_test))
-
         background = (
             X_test.sample(n=n_bg, random_state=42)
             if isinstance(X_test, pd.DataFrame)
             else X_test[:n_bg]
         )
-
         X_explain = (
             X_test.iloc[:n_ex] if isinstance(X_test, pd.DataFrame) else X_test[:n_ex]
         )
-
-        # --- Key fix: wrap predict_proba to restore DataFrame column names ---
-
         _base_predict = (
             model.predict_proba if hasattr(model, "predict_proba") else model.predict
         )
 
         def _predict_with_df(data):
-            """Always convert input to a DataFrame with correct column names."""
-
             if not isinstance(data, pd.DataFrame):
-
                 data = pd.DataFrame(data, columns=col_names)
-
             return _base_predict(data)
 
         explainer = shap.KernelExplainer(_predict_with_df, background)
-
         raw = explainer.shap_values(X_explain)
 
-        print("RAW TYPE:", type(raw))
-
-        if isinstance(raw, np.ndarray):
-
-            print("RAW SHAPE:", raw.shape)
-
-        elif isinstance(raw, list):
-
-            print("LIST LENGTH:", len(raw))
-
-            for i, arr in enumerate(raw):
-
-                print(f"class {i} shape:", np.array(arr).shape)
-
-        # -------------------------------------------------------------
-
         if isinstance(raw, list) and len(raw) == 2:
-
             val = raw[1]
-
             base_val = (
                 explainer.expected_value[1]
                 if isinstance(explainer.expected_value, (list, np.ndarray))
                 else explainer.expected_value
             )
-
         elif isinstance(raw, np.ndarray) and raw.ndim == 3:
-
-            print(
-                "[SHAP] Detected 3D SHAP output (samples, features, classes), extracting positive class (Class 1)"
-            )
-
             val = raw[:, :, 1]
-
             base_val = (
                 explainer.expected_value[1]
                 if isinstance(explainer.expected_value, (list, np.ndarray))
                 else explainer.expected_value
             )
-
         else:
-
             val = raw
-
             base_val = explainer.expected_value
 
         data_array = (
@@ -456,7 +403,6 @@ def generate_shap_explanation(
 
     model_label = prefix.rstrip("_").upper() if prefix else estimator.__class__.__name__
 
-    # Plot 1: Beeswarm Plot
     fig_bee = plt.figure(figsize=(10, 6))
     shap.plots.beeswarm(shap_values, max_display=max_display, show=False)
     plt.title(f"SHAP Beeswarm Plot ({model_label})", fontsize=13, fontweight="bold")
@@ -464,7 +410,6 @@ def generate_shap_explanation(
     _save_or_show(fig_bee, "shap_beeswarm.png")
     figures["beeswarm"] = fig_bee
 
-    # Plot 2: Bar Plot (Importance)
     fig_bar = plt.figure(figsize=(10, 6))
     shap.plots.bar(shap_values, max_display=max_display, show=False)
     plt.title(
@@ -474,9 +419,6 @@ def generate_shap_explanation(
     _save_or_show(fig_bar, "shap_feature_importance.png")
     figures["bar"] = fig_bar
 
-    # Plot 3: Single Sample Waterfall Plot
-    # shap.plots.waterfall() creates its own figure internally;
-    # use plt.gcf() to retrieve it after the call.
     shap.plots.waterfall(shap_values[0], max_display=min(10, max_display), show=False)
     fig_waterfall = plt.gcf()
     fig_waterfall.set_size_inches(10, 6)
