@@ -143,8 +143,17 @@ def main():
             print(f"    [!] Error evaluating {name}: {e}")
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if METRICS_PATH.exists():
+        try:
+            with open(METRICS_PATH, "r", encoding="utf-8") as f:
+                existing_metrics = json.load(f)
+        except json.JSONDecodeError:
+            existing_metrics = {}
+    else:
+        existing_metrics = {}
+    existing_metrics.update(all_metrics)
     with open(METRICS_PATH, "w", encoding="utf-8") as f:
-        json.dump(all_metrics, f, indent=4)
+        json.dump(existing_metrics, f, indent=4)
     print(f"[*] Metrics successfully saved to {METRICS_PATH}")
 
     # ── 2. MODEL PERFORMANCE COMPARISONS (CHARTS) ──────────────────────────

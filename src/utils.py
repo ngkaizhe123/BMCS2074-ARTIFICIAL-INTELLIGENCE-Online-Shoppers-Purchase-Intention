@@ -78,10 +78,7 @@ def save_cleaned_dataset(
     df: pd.DataFrame,
     filepath: str | Path = "data/processed/cleaned_online_shoppers_intention.csv",
 ) -> None:
-    """
-    Save the cleaned dataset to a single CSV file.
-    Creates parent directories if they do not exist.
-    """
+    """Save the cleaned dataset to a single CSV file."""
     path = Path(filepath)
     path.parent.mkdir(exist_ok=True, parents=True)
     df.to_csv(path, index=False)
@@ -89,6 +86,27 @@ def save_cleaned_dataset(
         f"[save_cleaned_dataset] Cleaned dataset saved to: {path.resolve()} (Shape: {df.shape})"
     )
 
+
+def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
+    """Evaluate a trained model and return a dictionary of evaluation metrics.
+
+    Decision threshold resolution (this is the fix for the
+    terminal-vs-metrics.json mismatch):
+      1. If `threshold` is passed explicitly, use it.
+      2. Else if the model itself has an `.optimal_threshold_` attribute
+         (set by a training script right before save_model(), e.g.
+         svm_model.py after its OOF threshold scan), use that.
+      3. Else fall back to 0.5 (equivalent to plain model.predict()).
+
+    Why this matters: re-evaluating a saved model later (e.g. from
+    model_visualize.py, after the process that trained it has already
+    exited) now automatically uses the SAME threshold the model was
+    tuned and originally reported with, instead of silently re-scoring
+    everything at the default 0.5 and producing different numbers than
+    what the training script printed and saved to metrics.json.
+    """
+    if threshold is None:
+        threshold = getattr(model, "optimal_threshold_", 0.5)
 
 def evaluate_model(model, X_test, y_test, threshold: float | None = None) -> dict:
     """Evaluate a trained model and return a dictionary of evaluation metrics.
@@ -146,7 +164,11 @@ def print_metrics(model_name: str, metrics: dict) -> None:
 
 
 def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
-    """Persist a model's metrics dict to the shared metrics.json file with a standardized schema."""
+    """Persist a model's metrics dict to the shared metrics.json file.
+
+    Reads the existing file, updates only this model_name's entry, and
+    writes the merged result back -- other models' entries are preserved.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cm = metrics.get("Confusion Matrix")
@@ -156,6 +178,9 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
     # Standardized schema matching model_visualize.py
     serializable_metrics = {
         "stem": stem,
+        "Threshold": (
+            float(metrics["Threshold"]) if metrics.get("Threshold") is not None else 0.5
+        ),
         "Threshold": float(metrics.get("Threshold", 0.5)),
         "Accuracy": float(metrics.get("Accuracy", 0.0)),
         "Precision": float(metrics.get("Precision", 0.0)),
@@ -201,7 +226,7 @@ def plot_confusion_matrix(model, X_test, y_test, threshold: float | None = None)
 
 
 def plot_roc_curve(model, X_test, y_test):
-    """Plot ROC curve chart."""
+    """Plot ROC curve chart. ROC-AUC is threshold-independent."""
     probabilities = model.predict_proba(X_test)[:, 1]
 
     fpr, tpr, _ = roc_curve(y_test, probabilities)
@@ -222,15 +247,7 @@ def plot_roc_curve(model, X_test, y_test):
 
 
 def save_model(model, output_path: str | Path, compress: int = 3) -> None:
-    """Save trained model/pipeline to file, creating parent directories if needed.
-
-    Args:
-        model: The trained model or pipeline to save.
-        output_path: Destination file path for the .pkl file.
-        compress: joblib compression level 0-9 (0 = none, 3 = good balance of
-            size vs speed, 9 = maximum compression). Defaults to 3, which
-            typically reduces file size by 3-5x with negligible load overhead.
-    """
+    """Save trained model/pipeline to file, creating parent directories if needed."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, path, compress=compress)
@@ -255,27 +272,7 @@ def generate_shap_explanation(
     prefix: str = "",
     show: bool = True,
 ):
-    """
-    Generate SHAP plots (Beeswarm, Feature Importance Bar, Waterfall) for a trained Pipeline or Model.
-
-    Parameters
-    ----------
-    model : Trained Pipeline or Estimator.
-    X_test : pandas DataFrame of raw testing features.
-    max_display : Maximum number of top features to display in plots.
-    save_dir : Directory path to save PNG figures (optional).
-    prefix : Optional filename prefix (e.g., 'xgboost_', 'knn_', 'svm_').
-    show : Whether to call plt.show() for figures.
-
-    Returns
-    -------
-    (explainer, shap_values, figures_dict)
-    """
-
-    # 1. Determine if the model contains ColumnTransformers that need
-    #    DataFrame column names (e.g. VotingClassifier with sub-Pipelines).
-    #    KernelExplainer internally converts all data to numpy arrays before
-    #    calling predict_proba, so we wrap predict_fn to restore column names.
+    """Generate SHAP plots (Beeswarm, Feature Importance Bar, Waterfall) for a trained Pipeline or Model."""
     is_imblearn_or_sklearn_pipeline = hasattr(model, "named_steps")
 
     if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
