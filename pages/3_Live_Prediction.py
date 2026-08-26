@@ -224,9 +224,18 @@ def load_preset(preset: dict) -> None:
         st.session_state[k] = v
 
 
-def load_random_real_session() -> None:
+def load_random_real_session(revenue: int) -> None:
+    """Load a random real session filtered by Revenue label.
+
+    Args:
+        revenue: 1 for Purchase sessions, 0 for No-Purchase sessions.
+    """
     pool = get_sample_pool()
-    row = pool.sample(1).iloc[0]
+    filtered = pool[pool["Revenue"] == revenue]
+    if filtered.empty:
+        st.warning("No sessions found for the selected revenue class.")
+        return
+    row = filtered.sample(1).iloc[0]
     preset = {
         "administrative": int(row["Administrative"]),
         "administrative_duration": float(row["Administrative_Duration"]),
@@ -247,15 +256,26 @@ def load_random_real_session() -> None:
     }
     for k, v in preset.items():
         st.session_state[k] = v
-    st.session_state["_last_random_truth"] = int(row["Revenue"])
+    st.session_state["_last_random_truth"] = revenue
 
 
 st.markdown("#### ⚡ Quick fill")
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.button("🟢 High-intent example", on_click=load_preset, args=(HIGH_INTENT_EXAMPLE,))
 c2.button("🔴 Low-intent example", on_click=load_preset, args=(LOW_INTENT_EXAMPLE,))
-c3.button("🎲 Random real session", on_click=load_random_real_session)
-c4.button("↩️ Reset form", on_click=load_preset, args=(DEFAULT_EXAMPLE,))
+c3.button(
+    "🎲 Random: Purchase",
+    on_click=load_random_real_session,
+    args=(1,),
+    help="Load a random real session where the customer made a purchase (Revenue = 1).",
+)
+c4.button(
+    "🎲 Random: No Purchase",
+    on_click=load_random_real_session,
+    args=(0,),
+    help="Load a random real session where the customer did NOT make a purchase (Revenue = 0).",
+)
+c5.button("↩️ Reset form", on_click=load_preset, args=(DEFAULT_EXAMPLE,))
 
 if "_last_random_truth" in st.session_state:
     truth = st.session_state["_last_random_truth"]
