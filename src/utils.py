@@ -46,13 +46,32 @@ def split_dataset(
     test_size: float = 0.2,
     random_state: int = 42,
 ):
-    """Split dataset into features X and target y, and then into train/test splits."""
+    """Perform a stratified train/test split on the dataset.
+
+    To prevent data leakage, ensure the same preprocessing is applied
+    consistently across all models and that the test set is never used
+    during training or hyperparameter tuning.
+    """
     X = df.drop(columns=[target]) if target in df.columns else df
     y = df[target].astype(int) if target in df.columns else None
+    if y is None:
+        raise ValueError(
+            f"Target column '{target}' is required for a stratified split."
+        )
 
-    return train_test_split(
+    X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
     )
+
+    print(f"[split_dataset] Total observations: {len(df):,}")
+    print(f"[split_dataset] Train: {len(X_train):,}; Test: {len(X_test):,}")
+    print(
+        f"[split_dataset] Train class distribution: {y_train.value_counts().sort_index().to_dict()}"
+    )
+    print(
+        f"[split_dataset] Test class distribution: {y_test.value_counts().sort_index().to_dict()}"
+    )
+    return X_train, X_test, y_train, y_test
 
 
 def save_cleaned_dataset(
@@ -111,26 +130,28 @@ def print_metrics(model_name: str, metrics: dict) -> None:
 
 
 def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
-    """Persist a model's metrics dict to the shared metrics.json file."""
+    """Persist a model's metrics dict to the shared metrics.json file with a standardized schema."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert non-serializable objects (like numpy arrays)
-    serializable_metrics = {"stem": stem}
-    for k, v in metrics.items():
-        if isinstance(v, np.ndarray):
-            serializable_metrics[k] = v.tolist()
-        else:
-            serializable_metrics[k] = v
+    cm = metrics.get("Confusion Matrix")
+    if hasattr(cm, "tolist"):
+        cm = cm.tolist()
 
-    # Ensure both "F1" and "F1 Score" keys exist for compatibility
-    if "F1" in metrics and "F1 Score" not in serializable_metrics:
-        serializable_metrics["F1 Score"] = metrics["F1"]
-    elif "F1 Score" in metrics and "F1" not in serializable_metrics:
-        serializable_metrics["F1"] = metrics["F1 Score"]
+    # Standardized 8-key schema matching model_visualize.py
+    serializable_metrics = {
+        "stem": stem,
+        "Accuracy": float(metrics.get("Accuracy", 0.0)),
+        "Precision": float(metrics.get("Precision", 0.0)),
+        "Recall": float(metrics.get("Recall", 0.0)),
+        "F1 Score": float(metrics.get("F1 Score", metrics.get("F1", 0.0))),
+        "AUC": float(metrics["AUC"]) if metrics.get("AUC") is not None else None,
+        "Confusion Matrix": cm,
+        "Classification Report": metrics.get("Classification Report", ""),
+    }
 
     if output_path.exists():
         try:
-            with open(output_path, "r") as f:
+            with open(output_path, "r", encoding="utf-8") as f:
                 all_metrics = json.load(f)
         except json.JSONDecodeError:
             all_metrics = {}
@@ -139,7 +160,7 @@ def save_metrics(model_name: str, stem: str, metrics: dict, output_path: Path):
 
     all_metrics[model_name] = serializable_metrics
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2)
 
     print(f"Metrics for {model_name} saved to {output_path}")
@@ -201,21 +222,6 @@ def load_model(filepath: str | Path):
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"Model file not found at {path.resolve()}")
-
-    # Ensure custom model classes are available in sys.modules['__main__']
-    # to support models saved when a script was executed directly as __main__
-    try:
-        import sys
-
-        main_mod = sys.modules.get("__main__")
-        if main_mod is not None:
-            from models.fsvm import FuzzySVM
-
-            if not hasattr(main_mod, "FuzzySVM"):
-                setattr(main_mod, "FuzzySVM", FuzzySVM)
-    except Exception:
-        pass
-
     return joblib.load(path)
 
 
@@ -253,7 +259,15 @@ def generate_shap_explanation(
     if is_imblearn_or_sklearn_pipeline and "preprocessor" in model.named_steps:
         # Standard Pipeline: pre-transform X_test and explain in feature space
         preprocessor = model.named_steps["preprocessor"]
-        X_transformed = preprocessor.transform(X_test)
+        # Keep SHAP aligned with the fitted inference route.  The cleaner is
+        # a row-preserving transformer; any outlier sampler is intentionally
+        # skipped at inference by imblearn Pipeline.
+        X_for_preprocessor = (
+            model.named_steps["cleaner"].transform(X_test)
+            if "cleaner" in model.named_steps
+            else X_test
+        )
+        X_transformed = preprocessor.transform(X_for_preprocessor)
         if hasattr(X_transformed, "toarray"):
             X_transformed = X_transformed.toarray()
         feature_names = (

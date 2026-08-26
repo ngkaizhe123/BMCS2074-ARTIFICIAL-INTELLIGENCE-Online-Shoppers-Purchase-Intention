@@ -24,6 +24,7 @@ from src.data_preprocessing import (
     build_preprocessor,
     get_smote,
     preprocess_data,
+    remove_outliers_iqr_train,
 )
 from src.utils import (
     evaluate_model,
@@ -246,6 +247,8 @@ def train_knn_rf_ensemble(
         ]
     )
 
+    X_train, y_train = remove_outliers_iqr_train(X_train, y_train)
+
     # ---- Step 3: Train the final combined model (Stacking) ------------
     # [Advanced Technique 4: Stacking Ensemble / Meta-Learning]
     # Instead of just taking a fixed average of the KNN and RF votes, we train a
@@ -275,7 +278,7 @@ def train_knn_rf_ensemble(
 
 
 if __name__ == "__main__":
-    df = preprocess_data(outlier_method="iqr")
+    df = preprocess_data()
     X_train, X_test, y_train, y_test = split_dataset(df)
 
     # 1. Advanced Evaluation: Nested Cross-Validation (Unbiased Estimate)

@@ -4,26 +4,29 @@ data_preprocessing.py
 Cleaning, splitting, and preprocessing pipeline for the
 Online Shoppers Intention dataset.
 
-Pipeline overview
------------------
- 1. load_data                    – Read raw CSV
- 2. remove_duplicates            – Drop 125 exact-duplicate rows (found via EDA)
- 3. handle_missing_values        – Median/mode imputation (safeguard; raw data has none)
- 4. remove_outliers_iqr          – IQR method (for KNN / SVM that are distance-sensitive)
- 5. remove_outliers_zscore       – Z-score method (alternative to IQR)
- 6. encode_target                – Boolean Revenue → int (0 / 1)
- 7. validate_business_rules      – Domain-level data integrity checks
- 8. fix_duration_consistency     – Fix page-count ↔ duration mismatches
- 9. cap_duration_outliers        – Cap extreme durations to business-meaningful limits
-10. clip_rates                   – Enforce BounceRates / ExitRates within [0, 1]
-11. validate_categorical_values  – Ensure categorical columns have valid values
-12. run_preprocessing_pipeline   – Steps 2-11 assembled; also called by preprocess_data()
-13. build_preprocessor           – sklearn ColumnTransformer (OHE + optional StandardScaler)
-14. get_smote                    – SMOTE instance for training pipelines
-15. preprocess_data              – Full pipeline: clean → split → (optional transform)
+Pre-split (deterministic — no learned statistics)
+--------------------------------------------------
+ 1. load_data                   – Read raw CSV
+ 2. remove_duplicates           – Drop ~125 exact-duplicate rows (EDA finding)
+ 3. validate_business_rules     – Report domain-level data integrity violations
+ 4. cap_duration_outliers       – Cap durations to fixed DURATION_CAPS constants
+ 5. clip_rates                  – Enforce BounceRates / ExitRates within [0, 1]
+ 6. drop_special_day            – Remove SpecialDay column
+ 7. encode_target               – Boolean Revenue → int (0 / 1)
+ 8. prepare_dataset_for_split   – Assembles steps 2-7; called by preprocess_data()
+ 9. preprocess_data             – Entry point: load → deterministic clean → return df
+
+Post-split (fitted on training data only — inside sklearn/imblearn Pipeline)
+-----------------------------------------------------------------------------
+10. TrainFittedDataCleaner      – Learns medians/modes/rare-cats in fit(); applies
+                                  stored values in transform() — safe for test set.
+11. TrainingOutlierFilter       – IQR / Z-score row removal in fit_resample();
+                                  imblearn skips it at predict time automatically.
+12. build_preprocessor          – ColumnTransformer: OHE + optional StandardScaler
+13. get_smote                   – SMOTE instance for use inside an imblearn Pipeline
 
 Saving cleaned data (run as script)
-------------------------------------
+-------------------------------------
     python src/data_preprocessing.py
     → writes  data/processed/cleaned_online_shoppers_intention.csv
 """
@@ -33,10 +36,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
-from scipy import stats
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -159,190 +160,98 @@ def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     return df_clean
 
 
-# ---------------------------------------------------------------------------
-# Step 3 – Handle Missing Values
-# ---------------------------------------------------------------------------
-
-
-def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+def handle_missing_value(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Impute missing values:
-    - Numerical columns -> median
-    - Categorical columns -> mode
+    Handle missing values if any are present.
 
-    EDA finding → Preprocessing action
-    ------------------------------------
-    EDA confirmed the raw dataset has 0 missing values.
-    This step is kept as a safeguard so the pipeline remains robust if the
-    dataset is ever updated or partially filled with NaN during merges.
+    The Online Shoppers Intention dataset is expected to contain
+    no missing values. Therefore, this function first checks for
+    missing values and only performs imputation when necessary.
+
+    Numerical features:
+        → median imputation
+
+    Categorical features:
+        → mode imputation
     """
-    missing_before = df.isnull().sum().sum()
+    df = df.copy()
 
+    missing_count = df.isnull().sum().sum()
+
+    if missing_count == 0:
+        print("[handle_missing_value] No missing values found.")
+        return df
+
+    print(
+        f"[handle_missing_value] {missing_count} missing values found. "
+        "Applying imputation..."
+    )
+
+    # Numerical columns → median
     for col in NUMERICAL_FEATURES:
         if col in df.columns and df[col].isnull().any():
-            median_val = df[col].median()
-            df[col] = df[col].fillna(median_val)
+            median_value = df[col].median()
+            df[col] = df[col].fillna(median_value)
 
+    # Categorical columns → mode
     for col in CATEGORICAL_FEATURES:
         if col in df.columns and df[col].isnull().any():
-            mode_val = df[col].mode()[0]
-            df[col] = df[col].fillna(mode_val)
+            mode = df[col].mode()
 
-    missing_after = df.isnull().sum().sum()
-    print(
-        f"[handle_missing_values] Missing values: {missing_before} -> {missing_after}"
-    )
+            if not mode.empty:
+                df[col] = df[col].fillna(mode.iloc[0])
+
+    remaining_missing = df.isnull().sum().sum()
+
+    if remaining_missing == 0:
+        print("[handle_missing_value] All missing values handled.")
+    else:
+        print(
+            f"[handle_missing_value] Warning: "
+            f"{remaining_missing} missing values remain."
+        )
+
     return df
 
 
 # ---------------------------------------------------------------------------
 # Step 4 – Remove Outliers
 # ---------------------------------------------------------------------------
-
-
-def _report_removal(df_before: pd.DataFrame, mask: pd.Series, method: str) -> None:
-    """Shared reporting/safety-check for outlier removal, incl. class balance."""
-    before = len(df_before)
-    after = int(mask.sum())
-    removed = before - after
-    pct_removed = removed / before * 100 if before else 0.0
-    print(
-        f"[{method}] Rows: {before:,} -> {after:,} "
-        f"(removed {removed}, {pct_removed:.1f}%)"
-    )
-
-    if TARGET in df_before.columns:
-        for cls in sorted(df_before[TARGET].unique()):
-            cls_before = (df_before[TARGET] == cls).sum()
-            cls_after = (df_before.loc[mask, TARGET] == cls).sum()
-            cls_pct_removed = (
-                (cls_before - cls_after) / cls_before * 100 if cls_before else 0.0
-            )
-            print(
-                f"    class {cls}: {cls_before} -> {cls_after} "
-                f"(removed {cls_pct_removed:.1f}%)"
-            )
-
-    if pct_removed > 20:
-        print(
-            f"    [WARNING] {method} removed more than 20% of rows. "
-            "Consider using CONTINUOUS_FEATURES_FOR_OUTLIERS-only columns, "
-            "a larger factor/threshold, or skipping outlier removal "
-            "entirely for tree-based models (RF/XGBoost), which are "
-            "robust to outliers by design."
-        )
-
-
-def remove_outliers_iqr(
-    df: pd.DataFrame,
+def remove_outliers_iqr_train(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
     columns: list[str] | None = None,
     factor: float = 1.5,
-) -> pd.DataFrame:
-    """
-    Remove outliers using the IQR method.
+):
+    columns = columns or CONTINUOUS_FEATURES_FOR_OUTLIERS
 
-    EDA finding → Preprocessing action
-    ------------------------------------
-    Box plots in EDA showed extreme right-skew and long tails in
-    Administrative, Administrative_Duration, ProductRelated,
-    ProductRelated_Duration, BounceRates, and ExitRates.
-    Distance-sensitive models (KNN, SVM) are strongly affected by these
-    extreme values, so outlier removal is recommended for those pipelines.
-    Tree-based models (XGBoost) are robust to outliers by design;
-    outlier_method='none' is the default for XGBoost.
+    mask = pd.Series(True, index=X_train.index)
 
-    NOTE: bounds are intersected (AND) across all `columns`, so the more
-    columns you pass, the more rows get dropped. By default this only runs
-    on CONTINUOUS_FEATURES_FOR_OUTLIERS — genuinely continuous, non-zero-
-    inflated columns — to avoid silently deleting most of the dataset.
-    Pass `columns` explicitly if you want a different set, but check the
-    per-column IQR first (a column with IQR==0 will flag almost everything
-    as an outlier).
-    """
-    if columns is None:
-        columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
-    columns = [c for c in columns if c in df.columns]
-
-    n_total = len(df)
-    print(f"\n[remove_outliers_iqr] IQR diagnostics (factor={factor}):")
-    print(
-        f"    {'Column':<26}{'Q1':>12}{'Median':>12}{'Q3':>12}{'IQR':>12}"
-        f"{'Lower':>14}{'Upper':>14}{'Flagged':>12}{'% Flagged':>12}"
-    )
-    print("    " + "-" * 126)
-
-    mask = pd.Series(True, index=df.index)
     for col in columns:
-        Q1 = df[col].quantile(0.25)
-        med = df[col].quantile(0.50)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-
-        if IQR == 0:
-            print(
-                f"    {col:<26}{Q1:>12.3f}{med:>12.3f}{Q3:>12.3f}{IQR:>12.3f}"
-                f"{'--':>14}{'--':>14}{'SKIPPED':>12}{'--':>12}"
-            )
-            print(
-                f"        [skip] IQR==0 (Q1==Q3=={Q1}); skipping to avoid "
-                "flagging every nonzero value as an outlier."
-            )
+        if col not in X_train.columns:
             continue
 
-        lower = Q1 - factor * IQR
-        upper = Q3 + factor * IQR
-        col_mask = df[col].between(lower, upper)
-        n_flagged = int((~col_mask).sum())
-        pct_flagged = n_flagged / n_total * 100 if n_total else 0.0
+        q1 = X_train[col].quantile(0.25)
+        q3 = X_train[col].quantile(0.75)
+        iqr = q3 - q1
 
-        print(
-            f"    {col:<26}{Q1:>12.3f}{med:>12.3f}{Q3:>12.3f}{IQR:>12.3f}"
-            f"{lower:>14.3f}{upper:>14.3f}{n_flagged:>12,}{pct_flagged:>11.2f}%"
-        )
+        if iqr == 0:
+            continue
 
-        mask &= col_mask
+        lower = q1 - factor * iqr
+        upper = q3 + factor * iqr
 
-    print("    " + "-" * 126)
-    n_flagged_any = int((~mask).sum())
-    pct_flagged_any = n_flagged_any / n_total * 100 if n_total else 0.0
+        mask &= X_train[col].between(lower, upper)
+
+    X_train_clean = X_train.loc[mask].copy()
+    y_train_clean = y_train.loc[mask].copy()
+
     print(
-        f"    [combined] Rows flagged by >=1 column: {n_flagged_any:,} "
-        f"({pct_flagged_any:.2f}% of {n_total:,})\n"
+        f"[remove_outliers_iqr_train] "
+        f"Rows: {len(X_train):,} -> {len(X_train_clean):,}"
     )
 
-    _report_removal(df, mask, "remove_outliers_iqr")
-    return df[mask].reset_index(drop=True)
-
-
-def remove_outliers_zscore(
-    df: pd.DataFrame,
-    columns: list[str] | None = None,
-    threshold: float = 3.0,
-) -> pd.DataFrame:
-    """
-    Remove outliers using the Z-score method.
-
-    EDA finding → Preprocessing action
-    ------------------------------------
-    Statistical summary in EDA shows high skewness and kurtosis for several
-    continuous features (see print_statistical_summary). Z-score method is
-    an alternative to IQR, typically removing rows where any feature deviates
-    more than `threshold` standard deviations from the mean.
-
-    By default this only runs on CONTINUOUS_FEATURES_FOR_OUTLIERS (see note
-    on remove_outliers_iqr) — running Z-score on categorical ID codes like
-    Browser/OperatingSystems is not meaningful.
-    """
-    if columns is None:
-        columns = CONTINUOUS_FEATURES_FOR_OUTLIERS
-    columns = [c for c in columns if c in df.columns]
-
-    z_scores = np.abs(stats.zscore(df[columns], nan_policy="omit"))
-    mask = (z_scores < threshold).all(axis=1)
-    mask = pd.Series(mask, index=df.index)
-
-    _report_removal(df, mask, "remove_outliers_zscore")
-    return df[mask].reset_index(drop=True)
+    return X_train_clean, y_train_clean
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +261,11 @@ def remove_outliers_zscore(
 
 def encode_target(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Convert boolean/string Revenue column to integer (0 or 1).
+    Convert boolean Revenue column to integer (0 or 1).
 
-    EDA finding → Preprocessing action
-    ------------------------------------
     EDA confirmed Revenue is a boolean column (True/False).
-    scikit-learn and XGBoost expect integer labels; this step ensures
-    True → 1 (purchase) and False → 0 (no purchase) for all models.
+    True → 1 (purchase) and False → 0 (no purchase).
+    This is deterministic and safe to apply before the train/test split.
     """
     df = df.copy()
     df[TARGET] = df[TARGET].astype(int)
@@ -453,60 +360,8 @@ def validate_business_rules(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------------------------
-# Step 7 – Fix Duration Consistency
-# ---------------------------------------------------------------------------
-
-
-def fix_duration_consistency(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fix cross-feature inconsistencies between page-count and duration columns.
-
-    Business logic
-    ---------------
-    - If pages_viewed == 0 but duration > 0:
-        → Set duration to 0 (can't spend time on pages never visited).
-    - If pages_viewed > 0 but duration == 0:
-        → Replace duration with the median of non-zero durations for that
-          feature (a visit must take *some* time; 0 is a tracking gap).
-
-    These inconsistencies are likely caused by incomplete tracking or
-    session-timeout quirks in Google Analytics. Leaving them unfixed
-    introduces noise: e.g. a session with 10 product pages but 0 seconds
-    would mislead the model into thinking heavy browsing = instant action.
-    """
-    df = df.copy()
-    total_fixed = 0
-
-    for pages_col, dur_col in PAGE_DURATION_PAIRS:
-        if pages_col not in df.columns or dur_col not in df.columns:
-            continue
-
-        # Case 1: duration > 0 but no pages visited → zero out duration
-        mask_dur_no_pages = (df[pages_col] == 0) & (df[dur_col] > 0)
-        n_fix1 = mask_dur_no_pages.sum()
-        if n_fix1 > 0:
-            df.loc[mask_dur_no_pages, dur_col] = 0
-            print(
-                f"    [{dur_col}] Set {n_fix1} rows to 0 "
-                f"(had duration > 0 but {pages_col} == 0)"
-            )
-            total_fixed += n_fix1
-
-        # Case 2: pages > 0 but duration == 0 → fill with median of non-zero
-        mask_pages_no_dur = (df[pages_col] > 0) & (df[dur_col] == 0)
-        n_fix2 = mask_pages_no_dur.sum()
-        if n_fix2 > 0:
-            nonzero_median = df.loc[df[dur_col] > 0, dur_col].median()
-            df.loc[mask_pages_no_dur, dur_col] = nonzero_median
-            print(
-                f"    [{dur_col}] Filled {n_fix2} rows with median {nonzero_median:.1f} "
-                f"(had {pages_col} > 0 but duration == 0)"
-            )
-            total_fixed += n_fix2
-
-    print(f"[fix_duration_consistency] Total rows fixed: {total_fixed}")
-    return df
+# fix_duration_consistency (median-learned) is handled by
+# TrainFittedDataCleaner.transform() inside the model pipeline.
 
 
 # ---------------------------------------------------------------------------
@@ -605,107 +460,23 @@ def clip_rates(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------------------------
-# Step 10 – Validate Categorical Values
-# ---------------------------------------------------------------------------
-
-
-def validate_categorical_values(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure categorical columns contain only valid values.
-
-    Business logic
-    ---------------
-    - Month: the raw dataset contains 10 months (Jan and Apr are absent).
-      Any value outside the known set is replaced with the column mode.
-    - VisitorType: must be one of Returning_Visitor, New_Visitor, Other.
-    - Weekend: must be boolean (True/False).
-
-    Invalid categories can arise from manual data entry (e.g. the Live
-    Prediction form), data merges, or encoding errors. Replacing with
-    mode is safe because these columns have dominant categories
-    (e.g. ~85% Returning_Visitor) and a single misfire won't bias the model.
-    """
-    df = df.copy()
-    total_fixed = 0
-
-    validations = {
-        "Month": VALID_MONTHS,
-        "VisitorType": VALID_VISITOR_TYPES,
-    }
-
-    for col, valid_set in validations.items():
-        if col not in df.columns:
-            continue
-        invalid_mask = ~df[col].isin(valid_set)
-        n_invalid = invalid_mask.sum()
-        if n_invalid > 0:
-            mode_val = df.loc[~invalid_mask, col].mode()[0]
-            invalid_values = df.loc[invalid_mask, col].unique().tolist()
-            df.loc[invalid_mask, col] = mode_val
-            print(
-                f"    [{col}] Replaced {n_invalid} invalid values "
-                f"{invalid_values} with mode '{mode_val}'"
-            )
-            total_fixed += n_invalid
-
-    # Weekend: coerce to boolean
-    if "Weekend" in df.columns:
-        try:
-            df["Weekend"] = df["Weekend"].astype(bool)
-        except (ValueError, TypeError):
-            n_bad = df["Weekend"].apply(lambda x: x not in (True, False, 0, 1)).sum()
-            if n_bad > 0:
-                print(f"    [Weekend] {n_bad} non-boolean values coerced")
-                total_fixed += n_bad
-
-    if total_fixed == 0:
-        print("[validate_categorical_values] All categories valid.")
-    else:
-        print(f"[validate_categorical_values] Total corrections: {total_fixed}")
-
-    return df
+# validate_categorical_values and group_rare_categories (mode/frequency-learned)
+# are handled by TrainFittedDataCleaner.fit() / .transform() inside the model
+# pipeline.  Standalone versions were removed to prevent accidental pre-split leakage.
 
 
 def drop_special_day(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Drop SpecialDay column from the dataset as requested.
+    Drop SpecialDay column from the dataset.
+
+    SpecialDay encodes proximity to a commercial holiday as a fixed ordinal
+    (0.0 – 1.0).  It is dropped because it is heavily zero-inflated and
+    adds little predictive signal once other session features are present.
+    This is a deterministic column drop — safe to run before the split.
     """
     if "SpecialDay" in df.columns:
         print("    [drop_special_day] Dropping 'SpecialDay' column.")
         df = df.drop(columns=["SpecialDay"])
-    return df
-
-
-def group_rare_categories(
-    df: pd.DataFrame,
-    threshold: int = 10,
-    rare_map: dict[str, list[str]] | None = None,
-) -> pd.DataFrame:
-    """
-    Group rare categories into an 'Other_xxx' category.
-    This applies to integer ID-coded categorical features (OperatingSystems, Browser,
-    TrafficType, Region) to reduce noise and dimensionality before One-Hot Encoding.
-    """
-    df = df.copy()
-    cols_to_group = ["OperatingSystems", "Browser", "TrafficType", "Region"]
-    for col in cols_to_group:
-        if col in df.columns:
-            # Convert column to string so we can mix original IDs with 'Other_xxx'
-            df[col] = df[col].astype(str)
-            if rare_map and col in rare_map:
-                rare_cats = rare_map[col]
-            elif len(df) >= threshold:
-                counts = df[col].value_counts()
-                rare_cats = counts[counts < threshold].index.tolist()
-            else:
-                rare_cats = []
-
-            if len(rare_cats) > 0:
-                print(
-                    f"    [{col}] Grouping {len(rare_cats)} rare categories into 'Other_{col}'."
-                )
-                df.loc[df[col].isin(rare_cats), col] = f"Other_{col}"
     return df
 
 
@@ -714,61 +485,68 @@ def group_rare_categories(
 # ---------------------------------------------------------------------------
 
 
+def prepare_dataset_for_split(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply only deterministic, non-data-learned preparation before splitting.
+
+    Anything that learns from feature distributions belongs in a fitted pipeline,
+    not here.  This is intentionally the only preparation allowed before the
+    train/test split is made.
+    """
+    print(f"\n[prepare_dataset_for_split] Starting. Input shape: {df.shape}")
+    df = remove_duplicates(df)
+    df = validate_business_rules(df)
+
+    # These rules use fixed, domain-defined constants only.
+    df = df.copy()
+    for pages_col, dur_col in PAGE_DURATION_PAIRS:
+        if pages_col in df.columns and dur_col in df.columns:
+            df.loc[(df[pages_col] == 0) & (df[dur_col] > 0), dur_col] = 0
+    df = cap_duration_outliers(df)
+    df = clip_rates(df)
+    df = drop_special_day(df)
+    df = handle_missing_value(df)
+    df = encode_target(df)
+    print(f"[prepare_dataset_for_split] Done. Output shape: {df.shape}\n")
+    return df
+
+
 def run_preprocessing_pipeline(
     df: pd.DataFrame,
     outlier_method: str = "none",
 ) -> pd.DataFrame:
     """
-    Run the full data cleaning pipeline on a raw DataFrame and return the
-    cleaned dataset (no train/test split, no sklearn transformers applied).
+    Apply only deterministic, pre-split preparation to a raw DataFrame.
 
     This function is called both when:
       a) Running this script directly to save cleaned_online_shoppers_intention.csv
       b) Inside preprocess_data() before the train/test split
 
-    Steps
-    -----
-    1. remove_duplicates            – Drop 125 duplicate rows found in EDA
-    2. handle_missing_values        – Median/mode imputation (safeguard)
-    3. validate_business_rules      – Flag domain-level data-quality issues
-    4. fix_duration_consistency     – Fix page-count ↔ duration mismatches
-    5. cap_duration_outliers        – Cap extreme durations to business limits
-    6. clip_rates                   – Enforce BounceRates/ExitRates in [0,1]
-    7. validate_categorical_values  – Replace invalid category values
-    8. group_rare_categories        – Group rare ID categories into 'Other_xxx'
-    9. remove_outliers_*            – Optional IQR or Z-score outlier removal
-    10. encode_target               – Revenue bool → int
+    Steps applied (all use fixed constants — no learned statistics)
+    ---------------------------------------------------------------
+    1. remove_duplicates       – Drop exact-duplicate rows (~125 found in EDA)
+    2. validate_business_rules – Report domain-level data-quality violations
+    3. duration zero-fix       – Set duration=0 where pages_count==0 (constant rule)
+    4. cap_duration_outliers   – Clip durations to DURATION_CAPS constants
+    5. clip_rates              – Enforce BounceRates / ExitRates in [0, 1]
+    6. drop_special_day        – Remove SpecialDay column
+    7. encode_target           – Revenue bool → int
+
+    Steps deferred to TrainFittedDataCleaner / TrainingOutlierFilter (inside Pipeline)
+    -----------------------------------------------------------------------------------
+    - Missing value imputation    (learns median / mode from training data)
+    - Duration consistency fix    (learns nonzero median from training data)
+    - Categorical validation       (learns mode from training data)
+    - Rare category grouping       (learns frequency counts from training data)
+    - IQR / Z-score outlier removal (learns Q1/Q3 or mean/std from training data)
     """
     print(f"\n[run_preprocessing_pipeline] Starting. Input shape: {df.shape}")
 
-    # --- Technical cleaning ---
-    df = remove_duplicates(df)
-    df = handle_missing_values(df)
-
-    # --- Business rule validation & fixes ---
-    df = validate_business_rules(df)
-    df = fix_duration_consistency(df)
-    df = cap_duration_outliers(df)
-    df = clip_rates(df)
-    df = validate_categorical_values(df)
-    df = group_rare_categories(df)
-    df = drop_special_day(df)
-
-    # --- Statistical outlier removal (optional) ---
-    if outlier_method == "iqr":
-        df = remove_outliers_iqr(df)
-    elif outlier_method == "zscore":
-        df = remove_outliers_zscore(df)
-    elif outlier_method != "none":
+    if outlier_method != "none":
         raise ValueError(
-            f"Unknown outlier_method '{outlier_method}'. "
-            "Use 'none', 'iqr', or 'zscore'."
+            "Outlier removal must be a TrainingOutlierFilter inside a training "
+            "pipeline. It cannot be applied before the train/test split."
         )
-
-    df = encode_target(df)
-
-    print(f"[run_preprocessing_pipeline] Done. Output shape: {df.shape}\n")
-    return df
+    return prepare_dataset_for_split(df)
 
 
 # ---------------------------------------------------------------------------
@@ -864,7 +642,7 @@ def preprocess_data(
     # 1. Load
     df = load_data(filepath)
 
-    # 2–5. Clean (duplicates → missing values → outliers → encode target)
+    # Only deterministic preparation is allowed before the train/test split.
     df = run_preprocessing_pipeline(df, outlier_method=outlier_method)
 
     return df
