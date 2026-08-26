@@ -39,7 +39,6 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.data_preprocessing import (
-    TrainFittedDataCleaner,
     build_preprocessor,
     get_smote,
     preprocess_data,
@@ -85,7 +84,6 @@ def _build_pipeline(params, preprocessor):
     )
     return Pipeline(
         [
-            ("cleaner", TrainFittedDataCleaner()),
             ("preprocessor", clone(preprocessor)),
             ("smote", get_smote()),
             ("xgb", xgb),
