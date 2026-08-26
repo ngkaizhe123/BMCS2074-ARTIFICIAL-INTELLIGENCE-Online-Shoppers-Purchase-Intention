@@ -572,14 +572,21 @@ def animated_header(text: str, level: int = 2) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 # VERDICT BANNER
 # ─────────────────────────────────────────────────────────────────────────
-def verdict_banner(will_purchase: bool, confidence_pct: float) -> None:
+def verdict_banner(
+    will_purchase: bool, confidence_pct: float, threshold: float = 0.5
+) -> None:
     """Big colored verdict banner shown after a prediction."""
+    threshold_note = (
+        f" · Decision Cutoff: {threshold * 100:.1f}%"
+        if abs(threshold - 0.5) > 0.001
+        else ""
+    )
     if will_purchase:
         st.markdown(
             f"""
             <div class="verdict-yes">
                 <p class="verdict-title">✅ Likely to Purchase</p>
-                <p class="verdict-sub">Model confidence: {confidence_pct:.1f}%</p>
+                <p class="verdict-sub">Model confidence: {confidence_pct:.1f}%{threshold_note}</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -589,7 +596,7 @@ def verdict_banner(will_purchase: bool, confidence_pct: float) -> None:
             f"""
             <div class="verdict-no">
                 <p class="verdict-title">🚫 Unlikely to Purchase</p>
-                <p class="verdict-sub">Model confidence: {confidence_pct:.1f}%</p>
+                <p class="verdict-sub">Model confidence: {confidence_pct:.1f}%{threshold_note}</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -641,47 +648,59 @@ def multi_model_verdict_banner(purchase_count: int, total_count: int) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 # PROBABILITY METER
 # ─────────────────────────────────────────────────────────────────────────
-def probability_meter(proba_purchase: float) -> None:
+def probability_meter(proba_purchase: float, threshold: float = 0.5) -> None:
     """Horizontal gradient meter (blue=No Purchase -> orange=Purchase)
-    with a marker at the predicted purchase probability. Pure HTML/CSS,
-    no extra plotting dependency needed."""
+    with a marker at the predicted purchase probability and a clear threshold cutoff indicator."""
     pct = max(0.0, min(1.0, proba_purchase)) * 100
-    st.markdown(
-        f"""
-        <div style="margin: 0.4rem 0 1.1rem 0;">
-          <div style="display:flex; justify-content:space-between; font-size:0.78rem;
-                      color:{MUTED}; margin-bottom:4px;">
-            <span>0% · No Purchase</span><span>50%</span><span>100% · Purchase</span>
-          </div>
-          <div style="position:relative; height:14px; border-radius:999px;
-                      background: linear-gradient(90deg, {PRIMARY} 0%, #E5E7EB 50%, {ACCENT} 100%);">
-            <div style="position:absolute; left:0%; top:-7px; transform:translateX(-50%);
-                        width:0; height:0; border-left:8px solid transparent;
-                        border-right:8px solid transparent; border-top:11px solid #111827;
-                        --target-pct:{pct}%; animation: fillProgress 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;"></div>
-          </div>
-          <div style="text-align:center; margin-top:10px; font-size:1.4rem; font-weight:800;
-                      animation: countUp 0.8s ease both 0.4s;">
-            {pct:.1f}%
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    thr_pct = max(0.0, min(1.0, threshold)) * 100
+    is_custom_threshold = abs(threshold - 0.5) > 0.001
+
+    cutoff_label = f"Cutoff: {thr_pct:.1f}%" if is_custom_threshold else "Cutoff:50.0%"
+    cutoff_color = (
+        "#374151"
+        if not is_custom_threshold
+        else ("#1E40AF" if thr_pct < 50 else "#9A3412")
     )
+    badge_html = (
+        '<span style="background:#EEF2FF; color:#4338CA; padding:2px 6px; border-radius:4px; font-weight:600;">Calibrated</span>'
+        if is_custom_threshold
+        else '<span style="background:#F3F4F6; color:#6B7280; padding:2px 6px; border-radius:4px; font-weight:500;">Standard</span>'
+    )
+    status_label = "&ge; Cutoff" if pct >= thr_pct else "&lt; Cutoff"
+
+    html = (
+        f'<div style="margin: 0.4rem 0 1.1rem 0;">'
+        f'<div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:0.72rem; color:{MUTED}; margin-bottom:6px; line-height:1.2;">'
+        f'<div style="flex:1; text-align:left; white-space:normal; padding-right:2px;">0%<br><span style="font-size:0.65rem; color:{MUTED};">No Purchase</span></div>'
+        f'<div style="flex:1; text-align:center; font-weight:700; color:{cutoff_color}; font-size:0.73rem; white-space:nowrap; padding:0 2px;">{cutoff_label}</div>'
+        f'<div style="flex:1; text-align:right; white-space:normal; padding-left:2px;">100%<br><span style="font-size:0.65rem; color:{MUTED};">Purchase</span></div>'
+        f'</div>'
+        f'<div style="position:relative; height:14px; border-radius:999px; background: linear-gradient(90deg, {PRIMARY} 0%, #E5E7EB 50%, {ACCENT} 100%);">'
+        f'<div style="position:absolute; left:{thr_pct}%; top:-3px; bottom:-3px; width:2px; background:#1F2937; border-left:1px dashed #FFFFFF; z-index:2;" title="Decision Cutoff: {thr_pct:.1f}%"></div>'
+        f'<div style="position:absolute; left:0%; top:-7px; transform:translateX(-50%); width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-top:11px solid #111827; z-index:3; --target-pct:{pct}%; animation: fillProgress 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;"></div>'
+        f'</div>'
+        f'<div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">'
+        f'<div style="font-size:0.72rem; color:{MUTED};">{badge_html}</div>'
+        f'<div style="font-size:1.2rem; font-weight:700; animation: countUp 0.8s ease both 0.4s;">{pct:.1f}%</div>'
+        f'<div style="font-size:0.72rem; color:{MUTED}; font-weight:600;">{status_label}</div>'
+        f'</div>'
+        f'</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # UTILITY HELPERS
 # ─────────────────────────────────────────────────────────────────────────
-def confidence_label(proba_purchase: float) -> str:
-    """Qualitative label for how far the prediction sits from the 0.5
+def confidence_label(proba_purchase: float, threshold: float = 0.5) -> str:
+    """Qualitative label for how far the prediction sits from the
     decision boundary — helps a non-technical viewer read the number."""
-    dist = abs(proba_purchase - 0.5)
-    if dist >= 0.35:
+    dist = abs(proba_purchase - threshold)
+    if dist >= 0.30:
         return "Very High"
-    if dist >= 0.20:
+    if dist >= 0.15:
         return "High"
-    if dist >= 0.08:
+    if dist >= 0.05:
         return "Moderate"
     return "Low (borderline case)"
 

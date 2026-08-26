@@ -16,6 +16,7 @@ from src.ui_theme import (
     apply_theme,
     confidence_label,
     model_icon,
+    multi_model_verdict_banner,
     navigation_breadcrumb,
     page_loading_animation,
     probability_meter,
@@ -77,6 +78,23 @@ def discover_models():
 
                             with open(summary_file, "r", encoding="utf-8") as sf:
                                 threshold = json.load(sf).get("selected_threshold")
+                        except Exception:
+                            pass
+                if threshold is None:
+                    # Also check metrics.json as fallback
+                    metrics_file = project_root / "report_assets" / "metrics.json"
+                    if metrics_file.exists():
+                        try:
+                            import json
+
+                            with open(metrics_file, "r", encoding="utf-8") as mf:
+                                mdata = json.load(mf)
+                                for m_k, m_v in mdata.items():
+                                    if (
+                                        m_v.get("stem") == pkl.stem.split("_")[0]
+                                        or m_k.lower() == nice_name.lower()
+                                    ):
+                                        threshold = m_v.get("Threshold")
                         except Exception:
                             pass
                 if threshold is not None:
@@ -475,21 +493,44 @@ if submitted:
 
             st.markdown("---")
             purchase_proba = float(proba[1]) if proba is not None else float(prediction)
-            confidence_pct = (
-                purchase_proba * 100 if prediction == 1 else (1 - purchase_proba) * 100
-            )
+            
+            if proba is not None:
+                if prediction == 1:
+                    confidence_pct = min(
+                        100.0,
+                        50.0 + (purchase_proba - threshold) / max(1e-5, (1.0 - threshold)) * 50.0,
+                    )
+                else:
+                    confidence_pct = min(
+                        100.0,
+                        50.0 + (threshold - purchase_proba) / max(1e-5, threshold) * 50.0,
+                    )
+            else:
+                confidence_pct = 100.0
 
-            # Trigger Success/Failure toast notifications based on prediction
-            # (Animations/Toasts removed as per user request)
-
-            verdict_banner(bool(prediction == 1), confidence_pct)
+            verdict_banner(bool(prediction == 1), confidence_pct, threshold=threshold)
 
             if proba is not None:
-                probability_meter(purchase_proba)
-                m1, m2, m3 = st.columns(3)
-                m1.metric("No Purchase probability", f"{proba[0] * 100:.1f}%")
-                m2.metric("Purchase probability", f"{proba[1] * 100:.1f}%")
-                m3.metric("Confidence", confidence_label(purchase_proba))
+                probability_meter(purchase_proba, threshold=threshold)
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("No Purchase prob.", f"{proba[0] * 100:.1f}%")
+                m2.metric("Purchase prob.", f"{proba[1] * 100:.1f}%")
+                m3.metric(
+                    "Decision Cutoff",
+                    f"{threshold * 100:.1f}%",
+                    help=f"Classified as Purchase if Purchase prob >= {threshold * 100:.1f}%",
+                )
+                m4.metric(
+                    "Confidence",
+                    confidence_label(purchase_proba, threshold=threshold),
+                )
+
+                if abs(threshold - 0.5) > 0.001:
+                    st.caption(
+                        f"ℹ️ **Calibrated Decision Boundary ({threshold * 100:.1f}%):** "
+                        f"This model uses an optimal decision threshold tuned to balance precision and recall "
+                        f"on class-imbalanced transaction data (default: 50%)."
+                    )
             else:
                 st.info(
                     "This model only exposes a hard class prediction, not a probability estimate."
@@ -537,6 +578,7 @@ if submitted:
                             "pred": pred,
                             "prob": prob,
                             "pur_prob": pur_prob,
+                            "threshold": threshold,
                             "error": None,
                         }
                     )
@@ -548,6 +590,7 @@ if submitted:
                             "pred": None,
                             "prob": None,
                             "pur_prob": None,
+                            "threshold": 0.5,
                             "error": str(e),
                         }
                     )
@@ -558,11 +601,6 @@ if submitted:
             total_count = len(valid_preds)
 
             if total_count > 0:
-                from src.ui_theme import multi_model_verdict_banner
-
-                # Mixed results → no toasts, just the amber banner
-                pass
-
                 multi_model_verdict_banner(purchase_count, total_count)
 
             # ── Display per-model cards ──────────────────────────────────
@@ -581,12 +619,26 @@ if submitted:
                         st.error("❌ No Purchase")
 
                     if result["prob"] is not None:
-                        probability_meter(result["pur_prob"])
+                        probability_meter(
+                            result["pur_prob"], threshold=result["threshold"]
+                        )
                         st.metric(
                             "No Purchase prob.", f"{result['prob'][0] * 100:.1f}%"
                         )
-                        st.metric("Purchase prob.", f"{result['prob'][1] * 100:.1f}%")
-                        st.metric("Confidence", confidence_label(result["pur_prob"]))
+                        st.metric(
+                            "Purchase prob.", f"{result['prob'][1] * 100:.1f}%"
+                        )
+                        st.metric(
+                            "Cutoff",
+                            f"{result['threshold'] * 100:.1f}%",
+                            help=f"Classified as Purchase if Purchase prob >= {result['threshold']*100:.1f}%",
+                        )
+                        st.metric(
+                            "Confidence",
+                            confidence_label(
+                                result["pur_prob"], threshold=result["threshold"]
+                            ),
+                        )
                     else:
                         st.caption("No probability available")
 
