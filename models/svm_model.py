@@ -830,18 +830,18 @@ if __name__ == "__main__":
     metrics_output_path = project_root / "report_assets" / "metrics.json"
     save_metrics("Svm Model", "svm", metrics, metrics_output_path)
 
-    # # ── 5. SHAP Interpretability ──────────────────────────────────
-    # try:
-    #     plot_dir = str(project_root / "report_assets" / "plots")
-    #     generate_shap_explanation(
-    #         model=model,
-    #         X_test=X_test,
-    #         save_dir=plot_dir,
-    #         prefix="svm_",
-    #         show=False,
-    #     )
-    # except Exception as exc:
-    #     print(f"[SHAP] Skipped: {exc}")
+    # ── 5. SHAP Interpretability ──────────────────────────────────
+    try:
+        plot_dir = str(project_root / "report_assets" / "plots")
+        generate_shap_explanation(
+            model=model,
+            X_test=X_test,
+            save_dir=plot_dir,
+            prefix="svm_",
+            show=False,
+        )
+    except Exception as exc:
+        print(f"[SHAP] Skipped: {exc}")
 
     # ── 6. Wall-clock duration ───────────────────────────────────────────────
     _total_seconds = time.perf_counter() - _SCRIPT_START

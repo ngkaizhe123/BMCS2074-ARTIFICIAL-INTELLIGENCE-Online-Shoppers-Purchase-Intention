@@ -460,7 +460,7 @@ def build_preprocessor(scale_numerical: bool = False) -> ColumnTransformer:
         preprocessor = ColumnTransformer(
             transformers=[
                 ("cat", cat_transformer, CATEGORICAL_FEATURES),
-                ("num", StandardScaler(), NUMERICAL_FEATURES),
+                ("num", num_transformer, NUMERICAL_FEATURES),
             ],
             verbose_feature_names_out=False,
         )

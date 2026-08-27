@@ -1,62 +1,62 @@
 {
-    "Knn Rf Ensemble Model": {
-        "stem": "knn",
-        "Threshold": 0.58,
-        "Accuracy": 0.8934862761163458,
-        "Precision": 0.708904109589041,
-        "Recall": 0.5418848167539267,
-        "F1 Score": 0.6142433234421365,
-        "AUC": 0.927159272660698,
-        "Confusion Matrix": [
-            [
-                1974,
-                85
-            ],
-            [
-                175,
-                207
-            ]
-        ],
-        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.92      0.96      0.94      2059\n           1       0.71      0.54      0.61       382\n\n    accuracy                           0.89      2441\n   macro avg       0.81      0.75      0.78      2441\nweighted avg       0.89      0.89      0.89      2441\n"
-    },
-    "Svm Model": {
-        "stem": "svm",
-        "Threshold": 0.18,
-        "Accuracy": 0.8803768947152806,
-        "Precision": 0.6013513513513513,
-        "Recall": 0.6989528795811518,
-        "F1 Score": 0.6464891041162227,
-        "AUC": 0.8791132786972786,
-        "Confusion Matrix": [
-            [
-                1882,
-                177
-            ],
-            [
-                115,
-                267
-            ]
-        ],
-        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.91      0.93      2059\n           1       0.60      0.70      0.65       382\n\n    accuracy                           0.88      2441\n   macro avg       0.77      0.81      0.79      2441\nweighted avg       0.89      0.88      0.88      2441\n"
-    },
-    "Xgboost Pso": {
-        "stem": "xgboost",
-        "Threshold": 0.5,
-        "Accuracy": 0.8992216304793118,
-        "Precision": 0.6770833333333334,
-        "Recall": 0.680628272251309,
-        "F1 Score": 0.6788511749347258,
-        "AUC": 0.935813654267181,
-        "Confusion Matrix": [
-            [
-                1935,
-                124
-            ],
-            [
-                122,
-                260
-            ]
-        ],
-        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.94      0.94      2059\n           1       0.68      0.68      0.68       382\n\n    accuracy                           0.90      2441\n   macro avg       0.81      0.81      0.81      2441\nweighted avg       0.90      0.90      0.90      2441\n"
-    }
+  "Knn Rf Ensemble Model": {
+    "stem": "knn",
+    "Threshold": 0.58,
+    "Accuracy": 0.8934862761163458,
+    "Precision": 0.708904109589041,
+    "Recall": 0.5418848167539267,
+    "F1 Score": 0.6142433234421365,
+    "AUC": 0.927159272660698,
+    "Confusion Matrix": [
+      [
+        1974,
+        85
+      ],
+      [
+        175,
+        207
+      ]
+    ],
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.92      0.96      0.94      2059\n           1       0.71      0.54      0.61       382\n\n    accuracy                           0.89      2441\n   macro avg       0.81      0.75      0.78      2441\nweighted avg       0.89      0.89      0.89      2441\n"
+  },
+  "Svm Model": {
+    "stem": "svm",
+    "Threshold": 0.61,
+    "Accuracy": 0.8914379352724293,
+    "Precision": 0.6451612903225806,
+    "Recall": 0.680628272251309,
+    "F1 Score": 0.6624203821656051,
+    "AUC": 0.9199695373904376,
+    "Confusion Matrix": [
+      [
+        1916,
+        143
+      ],
+      [
+        122,
+        260
+      ]
+    ],
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.93      0.94      2059\n           1       0.65      0.68      0.66       382\n\n    accuracy                           0.89      2441\n   macro avg       0.79      0.81      0.80      2441\nweighted avg       0.89      0.89      0.89      2441\n"
+  },
+  "Xgboost Pso": {
+    "stem": "xgboost",
+    "Threshold": 0.5,
+    "Accuracy": 0.8992216304793118,
+    "Precision": 0.6770833333333334,
+    "Recall": 0.680628272251309,
+    "F1 Score": 0.6788511749347258,
+    "AUC": 0.935813654267181,
+    "Confusion Matrix": [
+      [
+        1935,
+        124
+      ],
+      [
+        122,
+        260
+      ]
+    ],
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.94      0.94      2059\n           1       0.68      0.68      0.68       382\n\n    accuracy                           0.90      2441\n   macro avg       0.81      0.81      0.81      2441\nweighted avg       0.90      0.90      0.90      2441\n"
+  }
 }
