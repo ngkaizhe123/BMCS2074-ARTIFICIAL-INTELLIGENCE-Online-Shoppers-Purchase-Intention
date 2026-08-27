@@ -1,8 +1,8 @@
 {
-  "selected_threshold": 0.18,
-  "max_oof_f1": 0.7098,
-  "band_99pct_count": 8,
-  "selected_precision": 0.7083,
-  "selected_recall": 0.6991,
-  "selected_f1": 0.7036
+  "selected_threshold": 0.62,
+  "max_oof_f1": 0.7156,
+  "band_99pct_count": 53,
+  "selected_precision": 0.6885,
+  "selected_recall": 0.7389,
+  "selected_f1": 0.7128
 }
