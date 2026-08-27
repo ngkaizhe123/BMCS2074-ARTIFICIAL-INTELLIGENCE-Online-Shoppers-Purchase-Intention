@@ -458,9 +458,7 @@ def train_svm(
     print(
         "\n[train_svm] Searching Strategy A (SMOTENC) & C (SMOTENC + class_weight)..."
     )
-    pipeline_smotenc = _build_pipeline_with_smotenc(
-        smotenc_cat_idx, random_state
-    )
+    pipeline_smotenc = _build_pipeline_with_smotenc(smotenc_cat_idx, random_state)
     search_smotenc = RandomizedSearchCV(
         estimator=pipeline_smotenc,
         param_distributions=dist_A + dist_C,
@@ -480,9 +478,7 @@ def train_svm(
 
     # 2. Strategy B: Cost-sensitive class_weight only
     print("\n[train_svm] Searching Strategy B (class_weight only)...")
-    pipeline_no_smote = _build_pipeline_no_smote(
-        random_state
-    )
+    pipeline_no_smote = _build_pipeline_no_smote(random_state)
     search_no_smote = RandomizedSearchCV(
         estimator=pipeline_no_smote,
         param_distributions=dist_B,
