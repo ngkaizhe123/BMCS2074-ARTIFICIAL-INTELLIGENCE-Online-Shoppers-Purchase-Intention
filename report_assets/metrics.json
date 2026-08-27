@@ -1,23 +1,23 @@
 {
     "Knn Rf Ensemble Model": {
         "stem": "knn",
-        "Threshold": 0.58,
-        "Accuracy": 0.8934862761163458,
-        "Precision": 0.708904109589041,
-        "Recall": 0.5418848167539267,
-        "F1 Score": 0.6142433234421365,
+        "Threshold": 0.5,
+        "Accuracy": 0.8943056124539124,
+        "Precision": 0.6781609195402298,
+        "Recall": 0.6178010471204188,
+        "F1 Score": 0.6465753424657534,
         "AUC": 0.927159272660698,
         "Confusion Matrix": [
             [
-                1974,
-                85
+                1947,
+                112
             ],
             [
-                175,
-                207
+                146,
+                236
             ]
         ],
-        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.92      0.96      0.94      2059\n           1       0.71      0.54      0.61       382\n\n    accuracy                           0.89      2441\n   macro avg       0.81      0.75      0.78      2441\nweighted avg       0.89      0.89      0.89      2441\n"
+        "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.93      0.95      0.94      2059\n           1       0.68      0.62      0.65       382\n\n    accuracy                           0.89      2441\n   macro avg       0.80      0.78      0.79      2441\nweighted avg       0.89      0.89      0.89      2441\n"
     },
     "Svm Model": {
         "stem": "svm",
