@@ -71,7 +71,7 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     """Define hyperparameter distributions for Strategy A (SMOTENC), B (class_weight), and C (Combined)."""
     rbf_C = loguniform(0.1, 100)
     rbf_g = loguniform(1e-3, 1)
-    lin_C = loguniform(0.01, 0.5)
+    lin_C = loguniform(0.01, 0.15)
 
     dist_A = [
         {
@@ -130,7 +130,6 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
 def _build_pipeline_with_smotenc(
     smotenc_cat_indices: list[int],
     random_state: int = 42,
-    outlier_method: str = "iqr",
 ) -> Pipeline:
     """Construct imblearn Pipeline with Preprocessor, SMOTENC, and SVC."""
     return Pipeline(
@@ -158,7 +157,6 @@ def _build_pipeline_with_smotenc(
 
 def _build_pipeline_no_smote(
     random_state: int = 42,
-    outlier_method: str = "iqr",
 ) -> Pipeline:
     """Construct standard Pipeline with Preprocessor and SVC (cost-sensitive weighting)."""
     return Pipeline(
@@ -461,7 +459,7 @@ def train_svm(
         "\n[train_svm] Searching Strategy A (SMOTENC) & C (SMOTENC + class_weight)..."
     )
     pipeline_smotenc = _build_pipeline_with_smotenc(
-        smotenc_cat_idx, random_state, outlier_method=outlier_method
+        smotenc_cat_idx, random_state
     )
     search_smotenc = RandomizedSearchCV(
         estimator=pipeline_smotenc,
@@ -483,7 +481,7 @@ def train_svm(
     # 2. Strategy B: Cost-sensitive class_weight only
     print("\n[train_svm] Searching Strategy B (class_weight only)...")
     pipeline_no_smote = _build_pipeline_no_smote(
-        random_state, outlier_method=outlier_method
+        random_state
     )
     search_no_smote = RandomizedSearchCV(
         estimator=pipeline_no_smote,
