@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 # This lets the script find the project's other folders (like "src") when
 # run directly, e.g. "python models/knn_rf_ensemble_model.py"
@@ -10,11 +11,17 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from imblearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier, StackingClassifier
-from sklearn.metrics import f1_score
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.model_selection import GridSearchCV
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 
 from src.data_preprocessing import (
@@ -52,7 +59,7 @@ def train_knn_rf_ensemble(
 
     Both models are automatically tuned to find their best settings using
     GridSearchCV. Then a Stacking Classifier learns how to combine them,
-    followed by probability calibration and optimal threshold tuning.
+    followed by probability calibration and decision threshold configuration.
 
     Args:
         X_train: The training data (customer session features).
@@ -65,7 +72,7 @@ def train_knn_rf_ensemble(
         output_path: Where to save the finished model file. Set to None to skip saving.
 
     Returns:
-        The final trained, stacked, calibrated ensemble model with optimal threshold.
+        The final trained, stacked, calibrated ensemble model with default threshold 0.5.
 
     Raises:
         ValueError: If the training data is missing, missing expected columns,
@@ -217,27 +224,10 @@ def train_knn_rf_ensemble(
     )
     calibrated_ensemble.fit(X_train, y_train)
 
-    # ---- Step 5: Find the Optimal Decision Threshold --------------------
-    # [Advanced Technique: Optimal Threshold Tuning]
-    # Instead of using the default 0.5 cutoff, we scan every threshold
-    # from 0.01 to 0.99 and pick the one that gives the best F1 score.
-    # This compensates for the imbalanced dataset (far more non-buyers
-    # than buyers), where 0.5 may not be the best decision boundary.
-    print("[train_knn_rf_ensemble] Finding optimal decision threshold...")
-    train_proba = calibrated_ensemble.predict_proba(X_train)[:, 1]
-
-    best_threshold, best_f1_thresh = 0.5, -1.0
-    for t in np.arange(0.01, 1.0, 0.01):
-        preds = (train_proba >= t).astype(int)
-        f1 = f1_score(y_train, preds, zero_division=0)
-        if f1 > best_f1_thresh:
-            best_f1_thresh, best_threshold = f1, round(float(t), 2)
-
-    calibrated_ensemble.optimal_threshold_ = best_threshold
-    print(
-        f"[train_knn_rf_ensemble] Optimal threshold: {best_threshold:.4f} "
-        f"(F1 = {best_f1_thresh:.4f}, vs default 0.5)"
-    )
+    # ---- Step 5: Decision Threshold Configuration -----------------------
+    # Use standard default decision threshold of 0.50.
+    calibrated_ensemble.optimal_threshold_ = 0.5
+    print("[train_knn_rf_ensemble] Using default decision threshold: 0.5000")
 
     # ---- Step 6: Save the finished model so it can be reused later --------
     if output_path:
@@ -249,6 +239,112 @@ def train_knn_rf_ensemble(
             )
 
     return calibrated_ensemble
+
+
+def evaluate_threshold_range(
+    model,
+    X_test,
+    y_test,
+    thresholds: list[float] | np.ndarray | None = None,
+    save_csv_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """
+    Evaluate model performance across various decision thresholds (e.g., 0.10 to 0.90)
+    and print a comparison table showing Precision, Recall, Specificity, F1-Score,
+    Accuracy, and Confusion Counts (TP, FP, FN, TN).
+
+    This test provides empirical evidence for presentation on why the default 0.50
+    threshold is preferred over higher thresholds (which cause Recall to drop to 0.5+).
+
+    Args:
+        model: Trained classifier supporting `predict_proba`.
+        X_test: Test features.
+        y_test: True test labels (0 or 1).
+        thresholds: Array or list of float thresholds to evaluate. Defaults to 0.10 - 0.90 (step 0.05).
+        save_csv_path: Optional path to save the resulting DataFrame as a CSV file.
+
+    Returns:
+        pd.DataFrame containing the detailed metrics for each threshold.
+    """
+    if thresholds is None:
+        thresholds = np.arange(0.10, 0.95, 0.05)
+
+    if not hasattr(model, "predict_proba"):
+        raise ValueError(
+            "Model must implement predict_proba() to evaluate decision thresholds."
+        )
+
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    rows = []
+    for t in thresholds:
+        t_val = round(float(t), 2)
+        preds = (y_prob >= t_val).astype(int)
+
+        cm = confusion_matrix(y_test, preds)
+        tn, fp, fn, tp = cm.ravel() if cm.shape == (2, 2) else (0, 0, 0, 0)
+
+        acc = accuracy_score(y_test, preds)
+        prec = precision_score(y_test, preds, zero_division=0)
+        rec = recall_score(y_test, preds, zero_division=0)
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        f1 = f1_score(y_test, preds, zero_division=0)
+
+        note = "<- [DEFAULT: 0.50]" if np.isclose(t_val, 0.50) else ""
+
+        rows.append(
+            {
+                "Threshold": t_val,
+                "Accuracy": acc,
+                "Precision": prec,
+                "Recall": rec,
+                "Specificity": spec,
+                "F1 Score": f1,
+                "TP": tp,
+                "FP": fp,
+                "TN": tn,
+                "FN": fn,
+                "Note": note,
+            }
+        )
+
+    df_results = pd.DataFrame(rows)
+
+    # Print formatted comparison table
+    print("\n" + "=" * 96)
+    print(
+        "        KNN + RANDOM FOREST ENSEMBLE: DECISION THRESHOLD SENSITIVITY ANALYSIS"
+    )
+    print("=" * 96)
+    print(
+        f"{'Threshold':>9} | {'Accuracy':>8} | {'Precision':>9} | {'Recall':>8} | "
+        f"{'Specificity':>11} | {'F1 Score':>8} | {'TP':>4} | {'FP':>4} | {'FN':>4} | Note"
+    )
+    print("-" * 96)
+    for _, row in df_results.iterrows():
+        print(
+            f"{row['Threshold']:>9.2f} | {row['Accuracy']:>8.4f} | {row['Precision']:>9.4f} | "
+            f"{row['Recall']:>8.4f} | {row['Specificity']:>11.4f} | {row['F1 Score']:>8.4f} | "
+            f"{int(row['TP']):>4d} | {int(row['FP']):>4d} | {int(row['FN']):>4d} | {row['Note']}"
+        )
+    print("=" * 96)
+
+    # Print presentation insights
+    row_50 = df_results[np.isclose(df_results["Threshold"], 0.50)]
+    rec_50 = float(row_50["Recall"].values[0]) if not row_50.empty else 0.0
+    prec_50 = float(row_50["Precision"].values[0]) if not row_50.empty else 0.0
+    f1_50 = float(row_50["F1 Score"].values[0]) if not row_50.empty else 0.0
+    tp_50 = int(row_50["TP"].values[0]) if not row_50.empty else 0
+
+    if save_csv_path:
+        csv_file = Path(save_csv_path)
+        csv_file.parent.mkdir(parents=True, exist_ok=True)
+        df_results.to_csv(csv_file, index=False)
+        print(
+            f"[evaluate_threshold_range] Saved threshold results table to: {csv_file.resolve()}"
+        )
+
+    return df_results
 
 
 if __name__ == "__main__":
@@ -270,6 +366,17 @@ if __name__ == "__main__":
     # Print out how well the model performed on data it has never seen.
     metrics = evaluate_model(model, X_test, y_test)
     print_metrics("KNN + Random Forest Ensemble", metrics)
+
+    # Evaluate different threshold values and print comparison table for presentation
+    evaluate_threshold_range(
+        model=model,
+        X_test=X_test,
+        y_test=y_test,
+        save_csv_path=project_root
+        / "report_assets"
+        / "threshold_analysis"
+        / "knn_rf_threshold_results.csv",
+    )
 
     metrics_output_path = project_root / "report_assets" / "metrics.json"
     save_metrics("Knn Rf Ensemble Model", "knn", metrics, metrics_output_path)
