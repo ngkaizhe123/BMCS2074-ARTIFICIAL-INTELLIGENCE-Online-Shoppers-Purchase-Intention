@@ -22,22 +22,22 @@
   "Svm Model": {
     "stem": "svm",
     "Threshold": 0.62,
-    "Accuracy": 0.8922572716099959,
-    "Precision": 0.6529562982005142,
-    "Recall": 0.6649214659685864,
-    "F1 Score": 0.6588845654993515,
-    "AUC": 0.9142787761049053,
+    "Accuracy": 0.8934862761163458,
+    "Precision": 0.6622340425531915,
+    "Recall": 0.6518324607329843,
+    "F1 Score": 0.6569920844327177,
+    "AUC": 0.9155883123256602,
     "Confusion Matrix": [
       [
-        1924,
-        135
+        1932,
+        127
       ],
       [
-        128,
-        254
+        133,
+        249
       ]
     ],
-    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.93      0.94      2059\n           1       0.65      0.66      0.66       382\n\n    accuracy                           0.89      2441\n   macro avg       0.80      0.80      0.80      2441\nweighted avg       0.89      0.89      0.89      2441\n"
+    "Classification Report": "              precision    recall  f1-score   support\n\n           0       0.94      0.94      0.94      2059\n           1       0.66      0.65      0.66       382\n\n    accuracy                           0.89      2441\n   macro avg       0.80      0.80      0.80      2441\nweighted avg       0.89      0.89      0.89      2441\n"
   },
   "Xgboost Pso": {
     "stem": "xgboost",

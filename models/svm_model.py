@@ -93,9 +93,11 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     # Moderately widened parameter space — slightly wider than the original
     # bounds to explore more configurations, without spreading 120 iterations
     # too thin across the space.
-    rbf_C = loguniform(0.05, 500)
-    rbf_g = loguniform(5e-4, 1)
-    lin_C = loguniform(0.01, 5)
+    rbf_C = loguniform(0.1, 100)
+    rbf_g = loguniform(1e-3, 1)
+    lin_C = loguniform(
+        0.01, 0.5
+    )
     dist_A = [
         {
             "smotenc__k_neighbors": [3, 5, 7],
@@ -830,18 +832,18 @@ if __name__ == "__main__":
     metrics_output_path = project_root / "report_assets" / "metrics.json"
     save_metrics("Svm Model", "svm", metrics, metrics_output_path)
 
-    # ── 5. SHAP Interpretability ──────────────────────────────────
-    try:
-        plot_dir = str(project_root / "report_assets" / "plots")
-        generate_shap_explanation(
-            model=model,
-            X_test=X_test,
-            save_dir=plot_dir,
-            prefix="svm_",
-            show=False,
-        )
-    except Exception as exc:
-        print(f"[SHAP] Skipped: {exc}")
+    # # ── 5. SHAP Interpretability ──────────────────────────────────
+    # try:
+    #     plot_dir = str(project_root / "report_assets" / "plots")
+    #     generate_shap_explanation(
+    #         model=model,
+    #         X_test=X_test,
+    #         save_dir=plot_dir,
+    #         prefix="svm_",
+    #         show=False,
+    #     )
+    # except Exception as exc:
+    #     print(f"[SHAP] Skipped: {exc}")
 
     # ── 6. Wall-clock duration ───────────────────────────────────────────────
     _total_seconds = time.perf_counter() - _SCRIPT_START
