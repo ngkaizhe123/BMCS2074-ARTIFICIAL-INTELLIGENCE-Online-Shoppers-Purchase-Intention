@@ -226,9 +226,7 @@ def train_knn_rf_ensemble(
     # ---- Step 5: Decision Threshold Configuration -----------------------
     # Use standard default decision threshold of 0.50.
     calibrated_ensemble.optimal_threshold_ = 0.5
-    print(
-        "[train_knn_rf_ensemble] Using default decision threshold: 0.5000"
-    )
+    print("[train_knn_rf_ensemble] Using default decision threshold: 0.5000")
 
     # ---- Step 6: Save the finished model so it can be reused later --------
     if output_path:
@@ -271,7 +269,9 @@ def evaluate_threshold_range(
         thresholds = np.arange(0.10, 0.95, 0.05)
 
     if not hasattr(model, "predict_proba"):
-        raise ValueError("Model must implement predict_proba() to evaluate decision thresholds.")
+        raise ValueError(
+            "Model must implement predict_proba() to evaluate decision thresholds."
+        )
 
     y_prob = model.predict_proba(X_test)[:, 1]
 
@@ -291,25 +291,29 @@ def evaluate_threshold_range(
 
         note = "<- [DEFAULT: 0.50]" if np.isclose(t_val, 0.50) else ""
 
-        rows.append({
-            "Threshold": t_val,
-            "Accuracy": acc,
-            "Precision": prec,
-            "Recall": rec,
-            "Specificity": spec,
-            "F1 Score": f1,
-            "TP": tp,
-            "FP": fp,
-            "TN": tn,
-            "FN": fn,
-            "Note": note,
-        })
+        rows.append(
+            {
+                "Threshold": t_val,
+                "Accuracy": acc,
+                "Precision": prec,
+                "Recall": rec,
+                "Specificity": spec,
+                "F1 Score": f1,
+                "TP": tp,
+                "FP": fp,
+                "TN": tn,
+                "FN": fn,
+                "Note": note,
+            }
+        )
 
     df_results = pd.DataFrame(rows)
 
     # Print formatted comparison table
     print("\n" + "=" * 96)
-    print("        KNN + RANDOM FOREST ENSEMBLE: DECISION THRESHOLD SENSITIVITY ANALYSIS")
+    print(
+        "        KNN + RANDOM FOREST ENSEMBLE: DECISION THRESHOLD SENSITIVITY ANALYSIS"
+    )
     print("=" * 96)
     print(
         f"{'Threshold':>9} | {'Accuracy':>8} | {'Precision':>9} | {'Recall':>8} | "
@@ -335,7 +339,9 @@ def evaluate_threshold_range(
         csv_file = Path(save_csv_path)
         csv_file.parent.mkdir(parents=True, exist_ok=True)
         df_results.to_csv(csv_file, index=False)
-        print(f"[evaluate_threshold_range] Saved threshold results table to: {csv_file.resolve()}")
+        print(
+            f"[evaluate_threshold_range] Saved threshold results table to: {csv_file.resolve()}"
+        )
 
     return df_results
 
@@ -365,7 +371,10 @@ if __name__ == "__main__":
         model=model,
         X_test=X_test,
         y_test=y_test,
-        save_csv_path=project_root / "report_assets" / "threshold_analysis" / "knn_rf_threshold_results.csv",
+        save_csv_path=project_root
+        / "report_assets"
+        / "threshold_analysis"
+        / "knn_rf_threshold_results.csv",
     )
 
     # Generate charts explaining which features most influenced the
