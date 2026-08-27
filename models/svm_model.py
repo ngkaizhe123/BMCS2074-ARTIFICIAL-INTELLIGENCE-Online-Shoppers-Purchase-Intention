@@ -95,9 +95,7 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     # too thin across the space.
     rbf_C = loguniform(0.1, 100)
     rbf_g = loguniform(1e-3, 1)
-    lin_C = loguniform(
-        0.01, 0.5
-    )
+    lin_C = loguniform(0.01, 0.5)
     dist_A = [
         {
             "smotenc__k_neighbors": [3, 5, 7],
