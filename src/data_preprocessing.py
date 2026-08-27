@@ -47,7 +47,8 @@ from pathlib import Path
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import OneHotEncoder, PowerTransformer, StandardScaler
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -451,10 +452,15 @@ def build_preprocessor(scale_numerical: bool = False) -> ColumnTransformer:
     cat_transformer = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
 
     if scale_numerical:
+        # Yeo-Johnson power transform normalizes skewed distributions for RBF/Euclidean distance geometry
+        num_transformer = make_pipeline(
+            PowerTransformer(method="yeo-johnson"),
+            StandardScaler(),
+        )
         preprocessor = ColumnTransformer(
             transformers=[
                 ("cat", cat_transformer, CATEGORICAL_FEATURES),
-                ("num", StandardScaler(), NUMERICAL_FEATURES),
+                ("num", num_transformer, NUMERICAL_FEATURES),
             ],
             verbose_feature_names_out=False,
         )

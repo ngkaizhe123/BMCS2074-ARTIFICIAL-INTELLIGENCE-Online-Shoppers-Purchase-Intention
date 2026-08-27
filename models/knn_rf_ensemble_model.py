@@ -38,6 +38,7 @@ from src.utils import (
     print_metrics,
     save_model,
     split_dataset,
+    save_metrics,
 )
 
 
@@ -376,6 +377,9 @@ if __name__ == "__main__":
         / "threshold_analysis"
         / "knn_rf_threshold_results.csv",
     )
+
+    metrics_output_path = project_root / "report_assets" / "metrics.json"
+    save_metrics("Knn Rf Ensemble Model", "knn", metrics, metrics_output_path)
 
     # Generate charts explaining which features most influenced the
     # model's predictions (used in the report/dashboard).

@@ -49,6 +49,7 @@ from src.utils import (
     print_metrics,
     save_model,
     split_dataset,
+    save_metrics,
 )
 
 # Hyperparameters PSO searches over: name -> (low, high, is_integer)
@@ -226,6 +227,9 @@ if __name__ == "__main__":
     print_metrics("XGBoost (SMOTE + PSO)", metrics)
 
     threshold_scan(model, X_test, y_test)
+
+    metrics_output_path = project_root / "report_assets" / "metrics.json"
+    save_metrics("Xgboost Pso", "xgboost", metrics, metrics_output_path)
 
     try:
         generate_shap_explanation(
