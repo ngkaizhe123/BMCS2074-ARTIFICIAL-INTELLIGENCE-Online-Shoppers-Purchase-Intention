@@ -90,12 +90,12 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
     Strategy C – SMOTENC + class_weight combined.
         Pipeline must contain a "smotenc" step.
     """
-    # Bounded parameter space for stable QP convergence
-    rbf_C = loguniform(0.1, 100)
-    rbf_g = loguniform(1e-3, 1)
-    lin_C = loguniform(
-        0.01, 0.5
-    )  # Constrained to prevent linear separation stalls on noisy data
+    # Moderately widened parameter space — slightly wider than the original
+    # bounds to explore more configurations, without spreading 120 iterations
+    # too thin across the space.
+    rbf_C = loguniform(0.05, 500)
+    rbf_g = loguniform(5e-4, 1)
+    lin_C = loguniform(0.01, 5)
     dist_A = [
         {
             "smotenc__k_neighbors": [3, 5, 7],
@@ -117,12 +117,12 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
             "svm__kernel": ["rbf"],
             "svm__C": rbf_C,
             "svm__gamma": rbf_g,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}, {0: 1, 1: 4}],
         },
         {
             "svm__kernel": ["linear"],
             "svm__C": lin_C,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}, {0: 1, 1: 4}],
         },
     ]
 
@@ -132,13 +132,13 @@ def _make_svm_param_distributions() -> tuple[list, list, list]:
             "svm__kernel": ["rbf"],
             "svm__C": rbf_C,
             "svm__gamma": rbf_g,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}, {0: 1, 1: 4}],
         },
         {
             "smotenc__k_neighbors": [3, 5, 7],
             "svm__kernel": ["linear"],
             "svm__C": lin_C,
-            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}],
+            "svm__class_weight": ["balanced", {0: 1, 1: 2}, {0: 1, 1: 3}, {0: 1, 1: 4}],
         },
     ]
 
@@ -169,7 +169,7 @@ def _build_pipeline_with_smotenc(
             "svm",
             SVC(
                 random_state=random_state,
-                max_iter=60_000,
+                max_iter=100_000,
                 tol=1e-3,
                 cache_size=1024,
             ),
@@ -191,7 +191,7 @@ def _build_pipeline_no_smote(
             "svm",
             SVC(
                 random_state=random_state,
-                max_iter=60_000,
+                max_iter=100_000,
                 tol=1e-3,
                 cache_size=1024,
             ),
@@ -685,9 +685,9 @@ def train_svm(
         ]
         if hasattr(inner_svc, "n_iter_"):
             n_iter_arr = np.asarray(inner_svc.n_iter_)
-            if np.any(n_iter_arr >= 60_000):
+            if np.any(n_iter_arr >= 100_000):
                 print(
-                    f"[WARNING] SVC hit max_iter=60,000 (n_iter_={n_iter_arr.tolist()}). "
+                    f"[WARNING] SVC hit max_iter=100,000 (n_iter_={n_iter_arr.tolist()}). "
                     f"Consider raising max_iter or relaxing C/tol."
                 )
             else:
