@@ -493,17 +493,21 @@ if submitted:
 
             st.markdown("---")
             purchase_proba = float(proba[1]) if proba is not None else float(prediction)
-            
+
             if proba is not None:
                 if prediction == 1:
                     confidence_pct = min(
                         100.0,
-                        50.0 + (purchase_proba - threshold) / max(1e-5, (1.0 - threshold)) * 50.0,
+                        50.0
+                        + (purchase_proba - threshold)
+                        / max(1e-5, (1.0 - threshold))
+                        * 50.0,
                     )
                 else:
                     confidence_pct = min(
                         100.0,
-                        50.0 + (threshold - purchase_proba) / max(1e-5, threshold) * 50.0,
+                        50.0
+                        + (threshold - purchase_proba) / max(1e-5, threshold) * 50.0,
                     )
             else:
                 confidence_pct = 100.0
@@ -625,9 +629,7 @@ if submitted:
                         st.metric(
                             "No Purchase prob.", f"{result['prob'][0] * 100:.1f}%"
                         )
-                        st.metric(
-                            "Purchase prob.", f"{result['prob'][1] * 100:.1f}%"
-                        )
+                        st.metric("Purchase prob.", f"{result['prob'][1] * 100:.1f}%")
                         st.metric(
                             "Cutoff",
                             f"{result['threshold'] * 100:.1f}%",

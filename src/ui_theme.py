@@ -650,7 +650,8 @@ def multi_model_verdict_banner(purchase_count: int, total_count: int) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 def probability_meter(proba_purchase: float, threshold: float = 0.5) -> None:
     """Horizontal gradient meter (blue=No Purchase -> orange=Purchase)
-    with a marker at the predicted purchase probability and a clear threshold cutoff indicator."""
+    with a marker at the predicted purchase probability and a clear threshold cutoff indicator.
+    """
     pct = max(0.0, min(1.0, proba_purchase)) * 100
     thr_pct = max(0.0, min(1.0, threshold)) * 100
     is_custom_threshold = abs(threshold - 0.5) > 0.001
@@ -674,16 +675,16 @@ def probability_meter(proba_purchase: float, threshold: float = 0.5) -> None:
         f'<div style="flex:1; text-align:left; white-space:normal; padding-right:2px;">0%<br><span style="font-size:0.65rem; color:{MUTED};">No Purchase</span></div>'
         f'<div style="flex:1; text-align:center; font-weight:700; color:{cutoff_color}; font-size:0.73rem; white-space:nowrap; padding:0 2px;">{cutoff_label}</div>'
         f'<div style="flex:1; text-align:right; white-space:normal; padding-left:2px;">100%<br><span style="font-size:0.65rem; color:{MUTED};">Purchase</span></div>'
-        f'</div>'
+        f"</div>"
         f'<div style="position:relative; height:14px; border-radius:999px; background: linear-gradient(90deg, {PRIMARY} 0%, #E2E8F0 {thr_pct}%, {ACCENT} 100%);">'
         f'<div style="position:absolute; left:0%; top:-7px; transform:translateX(-50%); width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-top:11px solid #111827; z-index:3; --target-pct:{pct}%; animation: fillProgress 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;"></div>'
-        f'</div>'
+        f"</div>"
         f'<div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">'
         f'<div style="font-size:0.72rem; color:{MUTED};">{badge_html}</div>'
         f'<div style="font-size:1.2rem; font-weight:700; animation: countUp 0.8s ease both 0.4s;">{pct:.1f}%</div>'
         f'<div style="font-size:0.72rem; color:{MUTED}; font-weight:600;">{status_label}</div>'
-        f'</div>'
-        f'</div>'
+        f"</div>"
+        f"</div>"
     )
     st.markdown(html, unsafe_allow_html=True)
 
