@@ -1,0 +1,120 @@
+<mxfile host="Electron">
+  <diagram name="第 1 页" id="tPRS7__DRo4_IQ7x5K9C">
+    <mxGraphModel dx="858" dy="522" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Remove Duplicates" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Validate Business Rules" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Fix Duration Consistency" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Cap Duration Outliers" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="320" as="geometry" />
+        </mxCell>
+        <mxCell id="7" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Clip Rates" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Validate Categorical Values" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="9" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Group Rare Categories" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="10" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Drop Special Day" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Handle Missing Value" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="12" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Encode Target (Revenue)" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="740" as="geometry" />
+        </mxCell>
+        <mxCell id="13" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Train/Test Split&lt;br&gt;&lt;font style=&quot;font-size: 9px&quot;&gt;Stratified, 80%/20%&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="14" parent="1" style="rhombus;whiteSpace=wrap;html=1;" value="Outlier&lt;br&gt;Removal?" vertex="1">
+          <mxGeometry height="60" width="120" x="380" y="880" as="geometry" />
+        </mxCell>
+        <mxCell id="15" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="IQR Method&lt;br&gt;&lt;font style=&quot;font-size: 8px&quot;&gt;For SVM/KNN+RF&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="150" x="280" y="970" as="geometry" />
+        </mxCell>
+        <mxCell id="16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Skip&lt;br&gt;&lt;font style=&quot;font-size: 8px&quot;&gt;For XGBoost&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="150" x="450" y="970" as="geometry" />
+        </mxCell>
+        <mxCell id="17" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="One Hot Encoding&lt;br&gt;&lt;font style=&quot;font-size: 9px&quot;&gt;With scaling for SVM/KNN/RF&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="1050" as="geometry" />
+        </mxCell>
+        <mxCell id="18" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="SMOTE&lt;br&gt;&lt;font style=&quot;font-size: 9px&quot;&gt;Applied during training only&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="1120" as="geometry" />
+        </mxCell>
+        <mxCell id="19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="ML Model Training" vertex="1">
+          <mxGeometry height="50" width="200" x="340" y="1190" as="geometry" />
+        </mxCell>
+        <mxCell id="20" edge="1" parent="1" target="3">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="90" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="21" edge="1" parent="1" source="3" target="4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="22" edge="1" parent="1" source="4" target="5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="23" edge="1" parent="1" source="5" target="6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="24" edge="1" parent="1" source="6" target="7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="25" edge="1" parent="1" source="7" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="26" edge="1" parent="1" source="8" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="27" edge="1" parent="1" source="9" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="28" edge="1" parent="1" source="10" target="11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="29" edge="1" parent="1" source="11" target="12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="30" edge="1" parent="1" source="12" target="13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="31" edge="1" parent="1" source="13" target="14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="32" edge="1" parent="1" source="14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="15" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="33" edge="1" parent="1" source="14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="16" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="34" edge="1" parent="1" source="15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="35" edge="1" parent="1" source="16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="36" edge="1" parent="1" source="17" target="18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="37" edge="1" parent="1" source="18" target="19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="QfXjiG7-NcT0UE97EFsu-38" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;shapeInside=1;fixedSize=1;" value="Raw Dataset" vertex="1">
+          <mxGeometry height="60" width="200" x="340" y="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
