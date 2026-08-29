@@ -473,7 +473,7 @@ def train_svm(
     )
     search_smotenc.fit(X_train_clean, y_train_clean)
     print(
-        f"[train_svm] Strategy A+C | Best {scoring}: {search_smotenc.best_score_:.4f}"
+        f"[train_svm] Strategy A&C | Best {scoring}: {search_smotenc.best_score_:.4f}"
     )
 
     # 2. Strategy B: Cost-sensitive class_weight only
