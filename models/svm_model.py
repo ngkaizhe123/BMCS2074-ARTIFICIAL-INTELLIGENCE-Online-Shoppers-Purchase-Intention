@@ -155,7 +155,7 @@ def _build_pipeline_with_smotenc(
     )
 
 
-def _build_pipeline_no_smote(
+def _build_pipeline_no_smotenc(
     random_state: int = 42,
 ) -> Pipeline:
     """Construct standard Pipeline with Preprocessor and SVC (cost-sensitive weighting)."""
@@ -478,9 +478,9 @@ def train_svm(
 
     # 2. Strategy B: Cost-sensitive class_weight only
     print("\n[train_svm] Searching Strategy B (class_weight only)...")
-    pipeline_no_smote = _build_pipeline_no_smote(random_state)
-    search_no_smote = RandomizedSearchCV(
-        estimator=pipeline_no_smote,
+    pipeline_no_smotenc = _build_pipeline_no_smotenc(random_state)
+    search_no_smotenc = RandomizedSearchCV(
+        estimator=pipeline_no_smotenc,
         param_distributions=dist_B,
         n_iter=n_iter,
         scoring=scoring,
@@ -491,13 +491,13 @@ def train_svm(
         refit=True,
         error_score="raise",
     )
-    search_no_smote.fit(X_train_clean, y_train_clean)
+    search_no_smotenc.fit(X_train_clean, y_train_clean)
     print(
-        f"[train_svm] Strategy B   | Best {scoring}: {search_no_smote.best_score_:.4f}"
+        f"[train_svm] Strategy B   | Best {scoring}: {search_no_smotenc.best_score_:.4f}"
     )
 
     # 3. Strategy Selection
-    if search_smotenc.best_score_ >= search_no_smote.best_score_:
+    if search_smotenc.best_score_ >= search_no_smotenc.best_score_:
         best_search = search_smotenc
         best_class_weight = search_smotenc.best_params_.get("svm__class_weight")
         best_strategy = (
@@ -506,7 +506,7 @@ def train_svm(
             else "C (SMOTENC + class_weight)"
         )
     else:
-        best_search = search_no_smote
+        best_search = search_no_smotenc
         best_strategy = "B (class_weight only)"
 
     print(f"\n[train_svm] Winning strategy : {best_strategy}")
@@ -616,7 +616,7 @@ def train_svm(
 
     return calibrated_model, {
         "search_smotenc": search_smotenc,
-        "search_no_smote": search_no_smote,
+        "search_no_smotenc": search_no_smotenc,
         "best_strategy": best_strategy,
         "best_search": best_search,
         "optimal_threshold": optimal_threshold,
