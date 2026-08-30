@@ -219,4 +219,4 @@ __marimo__/
 /.idea/
 /anaconda_projects/
 
-.bkp
+*.bkp
